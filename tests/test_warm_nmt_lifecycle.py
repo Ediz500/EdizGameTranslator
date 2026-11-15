@@ -1,3 +1,5 @@
+from bootstrap import configure_paths
+configure_paths()
 from concurrent.futures import ThreadPoolExecutor
 import hashlib
 import json
@@ -7,7 +9,7 @@ import sys
 import tempfile
 import unittest
 from unittest.mock import patch
-from light_translation import WarmNMTClient,LocalEngineError
+from ediz_game_translator.translation.light_translation import WarmNMTClient,LocalEngineError
 
 
 class WorkerLifecycleTests(unittest.TestCase):
@@ -31,7 +33,7 @@ for line in sys.stdin:threading.Thread(target=run,args=(json.loads(line),)).star
         def launch(command,**kwargs):
             starts.append(kwargs['env'])
             return real([sys.executable,'-u','-c',script],**kwargs)
-        with tempfile.TemporaryDirectory() as folder,patch('light_translation.subprocess.Popen',side_effect=launch):
+        with tempfile.TemporaryDirectory() as folder,patch('ediz_game_translator.translation.light_translation.subprocess.Popen',side_effect=launch):
             self.folder(folder);c=WarmNMTClient(sys.executable,folder,threads=1)
             try:
                 with ThreadPoolExecutor(2) as pool:
@@ -47,7 +49,7 @@ for line in sys.stdin:threading.Thread(target=run,args=(json.loads(line),)).star
         real=subprocess.Popen
         script="import sys,json,time;print(json.dumps({'id':0,'ready':True}),flush=True);sys.stdin.readline();time.sleep(30)"
         def launch(command,**kwargs):return real([sys.executable,'-u','-c',script],**kwargs)
-        with tempfile.TemporaryDirectory() as folder,patch('light_translation.subprocess.Popen',side_effect=launch):
+        with tempfile.TemporaryDirectory() as folder,patch('ediz_game_translator.translation.light_translation.subprocess.Popen',side_effect=launch):
             self.folder(folder);c=WarmNMTClient(sys.executable,folder,threads=1,request_timeout=.1)
             with self.assertRaises(LocalEngineError):c.translate('Go!')
             c.close();

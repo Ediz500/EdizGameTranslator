@@ -2,7 +2,7 @@
 import base64
 import io
 from PIL import Image
-from obs_capture import ObsSource
+from ediz_game_translator.capture.obs_capture import ObsSource
 
 
 class LegacyObsSource(ObsSource):

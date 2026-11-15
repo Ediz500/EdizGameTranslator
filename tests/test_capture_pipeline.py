@@ -1,3 +1,5 @@
+from bootstrap import configure_paths
+configure_paths()
 import json
 from contextlib import closing
 from pathlib import Path
@@ -10,10 +12,10 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
-from capture_pipeline import CaptureRunner, DiagnosticLog, SubtitleGate, same_line
-from subtitle_store import SubtitleStore
+from ediz_game_translator.capture.capture_pipeline import CaptureRunner, DiagnosticLog, SubtitleGate, same_line
+from ediz_game_translator.storage.subtitle_store import SubtitleStore
 from benchmark_capture import LegacyGate, replay
-from core import subtitle_observation
+from ediz_game_translator.core import subtitle_observation
 
 
 def result(text='Follow me!', score=.98):
@@ -170,14 +172,14 @@ class PipelineTests(unittest.TestCase):
             store.close()
 
     def test_diagnostic_worker_cannot_initialize_api(self):
-        import app
+        from ediz_game_translator import app
         w = app.MainWindow.__new__(app.MainWindow)
-        with patch('app.WarmNMTClient') as api:
+        with patch('ediz_game_translator.app.WarmNMTClient') as api:
             w.translate_worker({'_diagnostic': True},None,None)
         api.assert_not_called()
 
     def test_capture_lock_and_obs_released_even_if_log_close_fails(self):
-        import app
+        from ediz_game_translator import app
         w = app.MainWindow.__new__(app.MainWindow)
         w.capture_lock = threading.Lock()
         w.post = MagicMock()
@@ -187,7 +189,7 @@ class PipelineTests(unittest.TestCase):
         source.read.return_value=SimpleNamespace(width=960)
         log = MagicMock()
         log.close.side_effect = OSError('full')
-        with patch('app.DiagnosticLog', return_value=log), patch('rapidocr.RapidOCR'), patch('app.CaptureRunner'),patch.object(w,'_make_capture_source',return_value=source):
+        with patch('ediz_game_translator.app.DiagnosticLog', return_value=log), patch('rapidocr.RapidOCR'), patch('ediz_game_translator.app.CaptureRunner'),patch.object(w,'_make_capture_source',return_value=source):
             with self.assertRaises(OSError):
                 w.capture_worker({'_log_path':None,'_store':MagicMock(),'_capture_session':'s',
                     '_ready':threading.Event(),
@@ -198,17 +200,17 @@ class PipelineTests(unittest.TestCase):
         source.close.assert_called_once()
 
     def test_test_ai_button_blocked_in_diagnostics(self):
-        import app
+        from ediz_game_translator import app
         w = app.MainWindow.__new__(app.MainWindow)
         w.diagnostic_active = True
         w.status_var = MagicMock()
-        with patch('app.WarmNMTClient') as api, patch.object(w,'prepare') as prepare:
+        with patch('ediz_game_translator.app.WarmNMTClient') as api, patch.object(w,'prepare') as prepare:
             w.test_ai()
         api.assert_not_called()
         prepare.assert_not_called()
 
     def test_ocr_test_during_capture_opens_shared_editor_without_new_capture(self):
-        import app
+        from ediz_game_translator import app
         w = app.MainWindow.__new__(app.MainWindow)
         w.capture_lock = threading.Lock()
         w.capture_lock.acquire()

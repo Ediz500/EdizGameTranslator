@@ -1,10 +1,12 @@
+from bootstrap import configure_paths
+configure_paths()
 import unittest
 from types import SimpleNamespace
-from subtitle_tracking import ActiveSubtitles,split_speaker
-from dialogue_filter import dialogue_candidates
-from capture_pipeline import CaptureRunner,DiagnosticLog
-from frame_sources import FramePacket
-from subtitle_store import SubtitleStore
+from ediz_game_translator.capture.subtitle_tracking import ActiveSubtitles,split_speaker
+from ediz_game_translator.capture.dialogue_filter import dialogue_candidates
+from ediz_game_translator.capture.capture_pipeline import CaptureRunner,DiagnosticLog
+from ediz_game_translator.capture.frame_sources import FramePacket
+from ediz_game_translator.storage.subtitle_store import SubtitleStore
 
 
 def result(texts,score=.99):

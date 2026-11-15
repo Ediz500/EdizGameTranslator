@@ -1,3 +1,5 @@
+from bootstrap import configure_paths
+configure_paths()
 import json
 from pathlib import Path
 import tempfile
@@ -7,11 +9,11 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import MagicMock,patch
 
-from capture_pipeline import same_line
-from dialogue_filter import dialogue_observation
-from frame_sources import LatestFrames,FramePacket
-from virtual_camera import validate_raw_source_config,VirtualCamera
-from obs_capture import ObsSource
+from ediz_game_translator.capture.capture_pipeline import same_line
+from ediz_game_translator.capture.dialogue_filter import dialogue_observation
+from ediz_game_translator.capture.frame_sources import LatestFrames,FramePacket
+from ediz_game_translator.capture.virtual_camera import validate_raw_source_config,VirtualCamera
+from ediz_game_translator.capture.obs_capture import ObsSource
 
 
 def box(x,y,w=400,h=30):
@@ -50,7 +52,7 @@ class DialogueTests(unittest.TestCase):
 
 class CaptureTests(unittest.TestCase):
     def test_cpu_profile_bounds_detector_and_disables_rotation_classifier(self):
-        from ocr_profiles import create_ocr
+        from ediz_game_translator.capture.ocr_profiles import create_ocr
         with patch('rapidocr.RapidOCR') as factory:
             create_ocr('bounded960_cpu2')
         p=factory.call_args.kwargs['params']
@@ -60,12 +62,12 @@ class CaptureTests(unittest.TestCase):
         self.assertEqual(p['EngineConfig.onnxruntime.intra_op_num_threads'],2)
 
     def test_invalid_profile_and_resolution_fail_closed(self):
-        from ocr_profiles import create_ocr
+        from ediz_game_translator.capture.ocr_profiles import create_ocr
         with self.assertRaises(ValueError):create_ocr('automatic_gpu')
         with self.assertRaises(ValueError):ObsSource('dummy',width=800)
 
     def test_demo_cannot_feed_diagnostic_camera(self):
-        import app
+        from ediz_game_translator import app
         w=app.MainWindow.__new__(app.MainWindow)
         w.running=True; w.diagnostic_active=True; w.status_var=MagicMock()
         with patch.object(w,'prepare') as prepare:
@@ -146,7 +148,7 @@ class CameraSafetyTests(unittest.TestCase):
         with self.assertRaises(ValueError):validate_raw_source_config(self.config(),'Other')
 
     def test_cannot_open_translation_without_live_guard(self):
-        with patch('virtual_camera.obs_camera_index') as camera:
+        with patch('ediz_game_translator.capture.virtual_camera.obs_camera_index') as camera:
             with self.assertRaises(ValueError):VirtualCamera('missing','Raw',diagnostic=False)
             with self.assertRaises(ValueError):VirtualCamera('missing','Raw',width=800,diagnostic=True)
         camera.assert_not_called()
@@ -156,7 +158,7 @@ class CameraSafetyTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder:
             path=Path(folder)/'scene.json'; path.write_text(json.dumps(self.config()))
             cap=MagicMock(); cap.read.return_value=(True,np.zeros((20,30,3),dtype=np.uint8))
-            with patch('virtual_camera.obs_camera_index',return_value=4),patch('cv2.VideoCapture',return_value=cap) as factory:
+            with patch('ediz_game_translator.capture.virtual_camera.obs_camera_index',return_value=4),patch('cv2.VideoCapture',return_value=cap) as factory:
                 camera=VirtualCamera(path,'Raw',diagnostic=True)
                 self.assertEqual(camera.read().size,(30,20))
                 factory.assert_called_once_with(4,cv2.CAP_DSHOW)

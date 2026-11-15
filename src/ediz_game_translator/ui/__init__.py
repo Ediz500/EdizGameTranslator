@@ -1,0 +1,1 @@
+"""Ediz Game Translator components."""

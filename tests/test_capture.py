@@ -1,9 +1,11 @@
+from bootstrap import configure_paths
+configure_paths()
 import sys
 import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from obs_capture import crop_frame
+from ediz_game_translator.capture.obs_capture import crop_frame
 from PIL import Image
 
 

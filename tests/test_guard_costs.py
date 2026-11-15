@@ -1,9 +1,11 @@
+from bootstrap import configure_paths
+configure_paths()
 import json
 from pathlib import Path
 import tempfile
 import unittest
 from unittest.mock import MagicMock
-from virtual_camera import VirtualCamera,CaptureConfigurationError
+from ediz_game_translator.capture.virtual_camera import VirtualCamera,CaptureConfigurationError
 
 
 def collection(source='Raw'):

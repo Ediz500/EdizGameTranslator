@@ -1,4 +1,6 @@
 """Real Windows Tk startup/close smoke test, isolated from credentials and API."""
+from bootstrap import configure_paths
+configure_paths()
 from pathlib import Path
 import sys
 import tempfile
@@ -15,7 +17,7 @@ class GuiTests(unittest.TestCase):
     def test_diagnostic_start_real_ui_fake_obs_ocr_zero_api(self):
         import tkinter as tk
         from PIL import Image
-        import app
+        from ediz_game_translator import app
         fake_obs = MagicMock()
         import time
         def read():
@@ -23,7 +25,7 @@ class GuiTests(unittest.TestCase):
             return Image.new('RGB',(1920,1080))
         fake_obs.read.side_effect=read
         ocr = MagicMock(return_value=SimpleNamespace(txts=['Follow me!'], scores=[.99], boxes=None))
-        with tempfile.TemporaryDirectory() as folder, patch('app.secret_get', return_value=''), patch('app.secret_save'), patch('app.config_folder', return_value=Path(folder)), patch('core.config_folder', return_value=Path(folder)), patch('rapidocr.RapidOCR', return_value=ocr), patch('app.WarmNMTClient') as engine, patch('app.VirtualCamera',return_value=fake_obs), patch.object(app.MainWindow,'_obs'), patch('app.messagebox.askyesno', return_value=True):
+        with tempfile.TemporaryDirectory() as folder, patch('ediz_game_translator.app.secret_get', return_value=''), patch('ediz_game_translator.app.secret_save'), patch('ediz_game_translator.app.config_folder', return_value=Path(folder)), patch('ediz_game_translator.core.config_folder', return_value=Path(folder)), patch('rapidocr.RapidOCR', return_value=ocr), patch('ediz_game_translator.app.WarmNMTClient') as engine, patch('ediz_game_translator.app.VirtualCamera',return_value=fake_obs), patch.object(app.MainWindow,'_obs'), patch('ediz_game_translator.app.messagebox.askyesno', return_value=True):
             root = tk.Tk()
             window = app.MainWindow(root)
             self.assertFalse(window.diagnostic_mode.get())
@@ -53,7 +55,7 @@ class GuiTests(unittest.TestCase):
             self.assertEqual(len(list((Path(folder)/'diagnostics').glob('*.jsonl'))),1)
 
     def test_single_instance_lock(self):
-        from instance_lock import InstanceLock
+        from ediz_game_translator.storage.instance_lock import InstanceLock
         with tempfile.TemporaryDirectory() as folder:
             path = Path(folder) / 'instance.lock'
             first = InstanceLock(path)
@@ -67,8 +69,8 @@ class GuiTests(unittest.TestCase):
 
     def test_real_window_opens_and_closes_without_api(self):
         import tkinter as tk
-        import app
-        with tempfile.TemporaryDirectory() as folder, patch('app.secret_get', return_value=''), patch('app.config_folder', return_value=Path(folder)), patch('core.config_folder', return_value=Path(folder)):
+        from ediz_game_translator import app
+        with tempfile.TemporaryDirectory() as folder, patch('ediz_game_translator.app.secret_get', return_value=''), patch('ediz_game_translator.app.config_folder', return_value=Path(folder)), patch('ediz_game_translator.core.config_folder', return_value=Path(folder)):
             root = tk.Tk()
             window = app.MainWindow(root)
             try:

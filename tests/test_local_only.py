@@ -1,4 +1,6 @@
 """Local-only boundary and non-destructive legacy data migration."""
+from bootstrap import configure_paths
+configure_paths()
 import ast
 from copy import deepcopy
 from contextlib import closing
@@ -12,9 +14,9 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from core import DEFAULTS,load_settings,save_settings
-from region_profiles import with_region,region_for
-from subtitle_store import SubtitleStore
+from ediz_game_translator.core import DEFAULTS,load_settings,save_settings
+from ediz_game_translator.storage.region_profiles import with_region,region_for
+from ediz_game_translator.storage.subtitle_store import SubtitleStore
 from cloud_guard import NoCloudImports
 
 
@@ -22,10 +24,15 @@ class LocalOnlyTests(unittest.TestCase):
     def test_application_imports_with_cloud_sdk_forbidden(self):
         root=Path(__file__).resolve().parents[1]
         script="""import sys
-sys.path[:0]=[sys.argv[1],sys.argv[1]+'/tests']
+sys.path[:0]=[sys.argv[1]+'/src',sys.argv[1]+'/tests']
 from cloud_guard import NoCloudImports
 with NoCloudImports() as guard:
- import app,core,app_ui,overlay_server,translation_dispatch,package_checks
+ from ediz_game_translator import app
+ from ediz_game_translator import core
+ from ediz_game_translator.ui import app_ui
+ from ediz_game_translator.subtitles import overlay_server
+ from ediz_game_translator.translation import translation_dispatch
+ from ediz_game_translator.diagnostics import package_checks
  assert not hasattr(core,'TranslationEngine')
  assert not hasattr(core,'BudgetLedger')
  assert not hasattr(core,'ContextMemory')
@@ -41,7 +48,7 @@ print('local-only imports OK')
     def test_no_source_imports_the_removed_sdk_or_price_configuration(self):
         root=Path(__file__).resolve().parents[1]
         forbidden={'openai','httpx2','httpcore2','jiter','model_config'}
-        for path in root.glob('*.py'):
+        for path in (root/'src').rglob('*.py'):
             tree=ast.parse(path.read_text(encoding='utf8'))
             for node in ast.walk(tree):
                 names=([a.name for a in node.names] if isinstance(node,ast.Import) else
@@ -50,7 +57,7 @@ print('local-only imports OK')
         self.assertFalse((root/'model_config.py').exists())
 
     def test_legacy_settings_keep_game_roi_notes_and_drop_cloud_fields_on_save(self):
-        with tempfile.TemporaryDirectory() as folder,patch('core.config_folder',return_value=Path(folder)):
+        with tempfile.TemporaryDirectory() as folder,patch('ediz_game_translator.core.config_folder',return_value=Path(folder)):
             settings=with_region(deepcopy(DEFAULTS),'Game',(.1,.3,.9,.95))
             settings.update(model='gpt-6-luna',budget_try=0,usd_try=0,estimated_total_usd=12.3,
                 token_total_in=10,token_total_out=20,api_key_runtime='dummy',lore='Existing note')
@@ -66,7 +73,7 @@ print('local-only imports OK')
             self.assertEqual(ledger.read_bytes(),before)
 
     def test_obs_vault_helpers_cannot_read_write_or_delete_a_legacy_api_key(self):
-        import app
+        from ediz_game_translator import app
         with patch('keyring.get_password') as read,patch('keyring.set_password') as write,patch('keyring.delete_password') as delete:
             with self.assertRaises(ValueError):app.secret_get('openai_api_key')
             with self.assertRaises(ValueError):app.secret_save('openai_api_key','')
@@ -102,7 +109,7 @@ print('local-only imports OK')
                 store.close()
 
     def test_historical_audit_separates_local_jobs_from_old_called_default(self):
-        from local_benchmark import audit
+        from ediz_game_translator.benchmarks.local_benchmark import audit
         with tempfile.TemporaryDirectory() as folder:
             path=Path(folder)/'audit.sqlite3';store=SubtitleStore(path)
             store.db.execute('ALTER TABLE translation_jobs ADD COLUMN api_called INTEGER DEFAULT 1')
@@ -139,7 +146,7 @@ print('local-only imports OK')
         finally:store.close()
 
     def test_corpus_export_accepts_local_schema_without_modifying_database(self):
-        from local_benchmark import export_corpus
+        from ediz_game_translator.benchmarks.local_benchmark import export_corpus
         with tempfile.TemporaryDirectory() as folder:
             path=Path(folder)/'corpus.sqlite3';store=SubtitleStore(path)
             for i in range(55):

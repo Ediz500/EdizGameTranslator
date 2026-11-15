@@ -1,4 +1,6 @@
 """Local session ownership and shutdown regressions."""
+from bootstrap import configure_paths
+configure_paths()
 import importlib.util
 from pathlib import Path
 import queue
@@ -14,9 +16,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 class SessionTests(unittest.TestCase):
     def setUp(self):
-        spec = importlib.util.spec_from_file_location('p1_app', Path(__file__).resolve().parents[1] / 'app.py')
+        spec = importlib.util.spec_from_file_location('p1_app', Path(__file__).resolve().parents[1] / 'src/ediz_game_translator/app.py')
         self.module = importlib.util.module_from_spec(spec)
-        with patch.dict(sys.modules, {'obs_capture': MagicMock()}):
+        with patch.dict(sys.modules, {'ediz_game_translator.capture.obs_capture': MagicMock()}):
             spec.loader.exec_module(self.module)
         self.window = self.module.MainWindow.__new__(self.module.MainWindow)
         w = self.window

@@ -1,4 +1,6 @@
 """Daily-use transition regressions. No paid API or physical camera calls."""
+from bootstrap import configure_paths
+configure_paths()
 from copy import deepcopy
 import json
 from pathlib import Path
@@ -13,24 +15,24 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import MagicMock, patch
 
-from core import DEFAULTS, load_settings
-import region_profiles as profiles
-import virtual_camera as camera
+from ediz_game_translator.core import DEFAULTS, load_settings
+from ediz_game_translator.storage import region_profiles as profiles
+from ediz_game_translator.capture import virtual_camera as camera
 
 
 class TransitionTests(unittest.TestCase):
     def test_production_obs_client_has_no_screenshot_path(self):
-        from obs_capture import ObsSource
+        from ediz_game_translator.capture.obs_capture import ObsSource
         self.assertFalse(hasattr(ObsSource,'frame'))
 
     def test_legacy_capture_migrates_without_losing_user_data(self):
-        with tempfile.TemporaryDirectory() as folder, patch('core.config_folder',return_value=Path(folder)):
+        with tempfile.TemporaryDirectory() as folder, patch('ediz_game_translator.core.config_folder',return_value=Path(folder)):
             old=deepcopy(DEFAULTS)
             old.update(capture_method='websocket',game='Legacy',crop_top=52,budget_try=321,
                        estimated_total_usd=1.25,token_total_in=987,lore='Existing note')
             (Path(folder)/'settings.json').write_text(json.dumps(old))
             loaded=load_settings()
-        self.assertEqual(loaded['capture_method'],'virtual_camera')
+        self.assertEqual(loaded['capture_method'],'ediz_game_translator.capture.virtual_camera')
         for key in ('game','crop_top','lore'):
             self.assertEqual(loaded[key],old[key])
 
@@ -66,7 +68,7 @@ class TransitionTests(unittest.TestCase):
             with self.assertRaises(ValueError):guard.check('Raw')
 
     def test_live_camera_needs_live_validator_before_device_open(self):
-        with patch('virtual_camera.obs_camera_index') as index:
+        with patch('ediz_game_translator.capture.virtual_camera.obs_camera_index') as index:
             with self.assertRaises(camera.CaptureConfigurationError):
                 camera.VirtualCamera('missing','Raw',diagnostic=False)
         index.assert_not_called()
@@ -98,15 +100,17 @@ class TransitionTests(unittest.TestCase):
 class DailyGuiTests(unittest.TestCase):
     """Real controller, tracking, SQLite, local engine, HTTP and Tk. Mock I/O only."""
     def setUp(self):
-        import app,tkinter as tk,numpy as np
+        from ediz_game_translator import app
+        import tkinter as tk
+        import numpy as np
         self.app=app;self.stack=ExitStack()
         self.folder=Path(self.stack.enter_context(tempfile.TemporaryDirectory()))
-        for target in ('app.config_folder','core.config_folder'):
+        for target in ('ediz_game_translator.app.config_folder','ediz_game_translator.core.config_folder'):
             self.stack.enter_context(patch(target,return_value=self.folder))
-        self.stack.enter_context(patch('app.secret_get',return_value=''))
-        self.secret_save=self.stack.enter_context(patch('app.secret_save'))
-        self.message=self.stack.enter_context(patch('app.messagebox.showerror'))
-        self.stack.enter_context(patch('app.messagebox.showwarning'))
+        self.stack.enter_context(patch('ediz_game_translator.app.secret_get',return_value=''))
+        self.secret_save=self.stack.enter_context(patch('ediz_game_translator.app.secret_save'))
+        self.message=self.stack.enter_context(patch('ediz_game_translator.app.messagebox.showerror'))
+        self.stack.enter_context(patch('ediz_game_translator.app.messagebox.showwarning'))
         self.obs=MagicMock()
         c=self.obs.client
         c.get_scene_collection_list.return_value.current_scene_collection_name='Test'
@@ -114,20 +118,20 @@ class DailyGuiTests(unittest.TestCase):
         c.get_input_settings.return_value=SimpleNamespace(input_kind='dshow_input',input_settings={'video_device_id':'raw-card'})
         c.get_source_filter_list.return_value.filters=[]
         self.stack.enter_context(patch.object(app.MainWindow,'_obs',return_value=self.obs))
-        self.route=self.stack.enter_context(patch('virtual_camera.RouteLog')).return_value
-        self.stack.enter_context(patch('virtual_camera.obs_camera_index',return_value=7))
+        self.route=self.stack.enter_context(patch('ediz_game_translator.capture.virtual_camera.RouteLog')).return_value
+        self.stack.enter_context(patch('ediz_game_translator.capture.virtual_camera.obs_camera_index',return_value=7))
         self.cap=MagicMock();pixels=np.zeros((540,960,3),dtype=np.uint8)
         def read():time.sleep(.015);return True,pixels
         self.cap.read.side_effect=read
         self.device=self.stack.enter_context(patch('cv2.VideoCapture',return_value=self.cap))
-        self.ocr=self.stack.enter_context(patch('app.create_ocr')).return_value
+        self.ocr=self.stack.enter_context(patch('ediz_game_translator.app.create_ocr')).return_value
         self.ocr.return_value=SimpleNamespace(txts=['Follow me!'],scores=[.99],boxes=None)
         from cloud_guard import NoCloudImports
         self.cloud_guard=self.stack.enter_context(NoCloudImports())
         self.local=MagicMock();self.local.closed=False
         self.local.translate.return_value=dict(text='Beni takip et!',complete=True,processing_ms=1)
-        self.local_factory=self.stack.enter_context(patch('app.WarmNMTClient',return_value=self.local))
-        self.stack.enter_context(patch('app.model_manifest',return_value=(self.folder,{})))
+        self.local_factory=self.stack.enter_context(patch('ediz_game_translator.app.WarmNMTClient',return_value=self.local))
+        self.stack.enter_context(patch('ediz_game_translator.app.model_manifest',return_value=(self.folder,{})))
         self.root=tk.Tk();self.w=app.MainWindow(self.root)
         config={'name':'Test','virtual-camera':{'type2':2,'source':'Raw'},
                 'sources':[{'name':'Raw','id':'dshow_input','settings':{'video_device_id':'raw-card'},'filters':[]}]}
@@ -210,7 +214,7 @@ class DailyGuiTests(unittest.TestCase):
 
     def test_game_save_failure_is_atomic_and_does_not_overwrite_profile(self):
         old=deepcopy(self.w.settings)
-        with patch('app.save_settings',side_effect=OSError('full')):
+        with patch('ediz_game_translator.app.save_settings',side_effect=OSError('full')):
             with self.assertRaises(OSError):self.w._change_game('New')
         self.assertEqual(self.w.settings,old)
         self.assertEqual(self.w.game.get(),old['game'])

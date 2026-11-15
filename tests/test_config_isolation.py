@@ -1,10 +1,12 @@
+from bootstrap import configure_paths
+configure_paths()
 import json
 import os
 from pathlib import Path
 import tempfile
 import unittest
 from unittest.mock import patch
-from core import config_folder,load_settings,save_settings
+from ediz_game_translator.core import config_folder,load_settings,save_settings
 
 
 class ConfigIsolationTests(unittest.TestCase):

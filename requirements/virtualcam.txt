@@ -1,0 +1,4 @@
+# Required primary capture adapter; never opens arbitrary camera 0.
+-c windows-lock.txt
+pygrabber==0.2
+comtypes==1.5.0

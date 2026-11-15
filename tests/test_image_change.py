@@ -1,6 +1,8 @@
+from bootstrap import configure_paths
+configure_paths()
 import unittest
 from PIL import Image,ImageDraw
-from image_change import ImageChangeGate
+from ediz_game_translator.capture.image_change import ImageChangeGate
 
 
 def frame(text=''):

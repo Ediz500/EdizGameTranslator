@@ -1,7 +1,9 @@
 """Deterministic time, real SQLite; no paid API or hardware."""
+from bootstrap import configure_paths
+configure_paths()
 import unittest
-from subtitle_store import SubtitleStore
-from subtitle_display import DisplayManager,reading_seconds
+from ediz_game_translator.storage.subtitle_store import SubtitleStore
+from ediz_game_translator.subtitles.subtitle_display import DisplayManager,reading_seconds
 
 
 class DisplayTests(unittest.TestCase):

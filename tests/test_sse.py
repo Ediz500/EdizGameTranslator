@@ -1,9 +1,11 @@
+from bootstrap import configure_paths
+configure_paths()
 import json
 import time
 import unittest
 from urllib.request import urlopen,Request
 from urllib.error import HTTPError
-from overlay_server import SharedOverlayState,launch_server
+from ediz_game_translator.subtitles.overlay_server import SharedOverlayState,launch_server
 
 
 class SSETests(unittest.TestCase):

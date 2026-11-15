@@ -1,3 +1,5 @@
+from bootstrap import configure_paths
+configure_paths()
 import unittest
 from unittest.mock import patch
 import runtime_check
