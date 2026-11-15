@@ -1,5 +1,10 @@
 # Yerel geliştirme ölçüm raporu — 15 Kasım 2026
 
+Bu belge ölçüm anındaki sürümün tarihsel raporudur. API kodu artık
+`archive/openai-api-legacy` dalında korunur; aktif yerel daldan kaldırılmıştır.
+Güncel temizlik ve önce/sonra karşılaştırması [YEREL_TEMIZLIK_RAPORU.md](YEREL_TEMIZLIK_RAPORU.md)
+dosyasındadır. Aşağıdaki ölçülmüş veriler değiştirilmedi.
+
 | Model / çalışma biçimi | İlk süreç → sıcak hazır | Sıcak tam sonuç p50 / p95 | Türkçe kalite | VRAM | Hata oranı |
 |---|---:|---:|---|---|---|
 | OPUS-MT EN→TR, CT2 INT8 CPU, beam 4 | 980 ms | 129 / 334 ms | Kısa ifadeler kullanılabilir; uzun/deyimli repliklerde anlam kaybı | Model CPU'da; sistem GPU toplamı 1435 MiB civarı | Çalıştırma 0/177; kalite ölçülmedi |

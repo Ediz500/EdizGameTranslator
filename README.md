@@ -1,9 +1,15 @@
 # EdizGameTranslator
 
-Bu dal **düşük gecikmeli yerel geliştirme sürümüdür**. Canlı yol internet veya
+Bu dal **yalnız yerel çeviri kullanan geliştirme sürümüdür**. Canlı yol internet veya
 ücretli API kullanmaz. Ana sürümden ayrı profil ile denenmelidir. Gerçek PS5
 uçtan uca hedefleri henüz doğrulanmadı; ölçümler ve sınırlamalar
 [PERFORMANS_YEREL.md](PERFORMANS_YEREL.md) dosyasındadır.
+
+Eski API sürümü kaynakları, testleri, bağımlılıkları ve kurulum talimatlarıyla
+[archive/openai-api-legacy](https://github.com/Ediz500/EdizGameTranslator/tree/archive/openai-api-legacy)
+dalında birebir korunur. Aktif dalda OpenAI SDK, fiyatlandırma, bütçe/token
+takibi veya bulut çeviri yolu bulunmaz. Temizlik doğrulaması
+[YEREL_TEMIZLIK_RAPORU.md](YEREL_TEMIZLIK_RAPORU.md) dosyasındadır.
 
 Windows üzerinde PS5/capture card görüntüsündeki İngilizce oyun diyaloglarını
 OCR ile okuyup Türkçe altyazıya çeviren masaüstü uygulaması. Tkinter arayüzü,
@@ -29,11 +35,12 @@ OBS: [resmî indirme sayfası](https://obsproject.com/download).
 
 ## Kurulum ve başlatma
 
-Özel depoyu klonlamak için GitHub hesabınızın depoya erişimi olmalıdır:
+Yalnız yerel sürümü kurmak için temizlik dalını seçin (`main` eski API sürümüdür):
 
 ```powershell
 git clone https://github.com/Ediz500/EdizGameTranslator.git
 cd EdizGameTranslator
+git switch codex/local-only-cleanup
 .\KURULUM.bat
 .\BASLAT.bat
 ```
@@ -76,7 +83,7 @@ sonra yapın. Yerel çeviri de ağırlıklar hazırlandıktan sonra ağsız çal
 5. Uygulamada aynı ham kaynak adını seçin. OBS koleksiyonu otomatik bulunamazsa
    gelişmiş ayarlardan kendi koleksiyon dosyanızı belirtin.
 6. Oyunu seçin ve **OCR Bölgesini Düzenle** ile İngilizce altyazının bulunduğu
-   bölgeyi işaretleyin. İlk denemeyi **API'siz OCR tanılama** modunda yapın.
+   bölgeyi işaretleyin. İlk denemeyi **Yalnız OCR tanılama** modunda yapın.
 7. Kaynak doğrulandıktan sonra yerel Python yolunu, model klasörünü ve CPU/CUDA
    aygıtını seçin. CUDA için eşzamanlılığı 1 ve hesaplamayı `int8_float16` yapın.
 
@@ -140,9 +147,10 @@ deyimli repliklerde hâlâ anlam kaybı vardır. Kalite onayı verilmiş ürün 
 GUI, ayrı Python alt sürecini oturum başında bir kez yükler ve sıcak tutar.
 CPU'da 1–4 işçi, GPU'da bu sürümde 1 işçi sınırı vardır; toplam CPU thread sınırı
 kontrol edilir. Süre aşımı/çökme açık hata verir, otomatik bulut dönüşü yoktur.
-Luna/Terra/Sol kaynak kodu ve SDK sözleşme testleri tarihsel uyumluluk için
-korunur; canlı yol ve GUI test düğmesi yerel motor kullanır. Anahtar ve geçmiş
-bütçe kayıtları bu çalışma için değiştirilmez, yeni API ücreti oluşturulmaz.
+Eski bulut motorlarının kaynak ve sözleşme testleri yalnız arşiv dalındadır.
+Canlı yol ve GUI test düğmesi yerel motor kullanır. Eski Windows kasa anahtarı,
+harcama dosyası, kişisel veritabanı ve çalışan eski EXE otomatik silinmez.
+Eski ayarlar okunur; artık kullanılmayan bulut alanları yeni ayara yazılmaz.
 
 Model indirmek tamamen isteğe bağlı ve açık bir CLI işlemidir. Ana uygulama
 ortamından ayrı ortam oluşturun:
@@ -277,7 +285,7 @@ açar. Kayıtlı Luna yanıtları varsa referans alınır; bunlar kusursuz doğr
 yüzdeliklere katılmaz. Yükleme, tam yanıt p50/p95, kısa/uzun replikler, VRAM,
 RAM, GPU/CPU yükü ve çalışma hataları ayrı kaydedilir.
 
-OBS ve API'siz OCR çalışırken aynı deneyi ayrı dosyaya `--workload obs-ocr` ile
+OBS ve yalnız OCR çalışırken aynı deneyi ayrı dosyaya `--workload obs-ocr` ile
 tekrarlayın. Etiket tek başına OBS/OCR'nin gerçekten aktif olduğunun kanıtı
 değildir. TranslateGemma için bağlamlı deneme ayrıca `--experimental-context`
 kullanır ve resmî şablon dışı deney olarak işaretlenir. MiLMMT resmî çeviri
@@ -296,7 +304,8 @@ Benchmark ağsız yerel dosya yükler; CUDA hatası veya zaman aşımı açık h
 
 ## Kullanıcı verileri ve örnek yapılandırma
 
-- Anahtarlar Windows Kimlik Bilgisi Yöneticisi'nde saklanır.
+- Yalnız OBS parolası Windows Kimlik Bilgisi Yöneticisi üzerinden yönetilir.
+  Eski API anahtarı uygulama tarafından okunmaz, yazılmaz veya silinmez.
 - Gerçek ayarlar, harcama defteri, SQLite ve tanılama dosyaları
   `%APPDATA%\EdizGameTranslator` altında yereldir.
 - `examples/settings.example.json` kişisel veri ve anahtar içermeyen ayar örneğidir.
@@ -317,7 +326,8 @@ Overlay HTML/CSS/JavaScript'i `overlay_view.py` içinde gömülüdür; bu bileş
 .\PAKETLE.bat
 ```
 
-Otomatik testlerde ücretli OpenAI çağrıları taklit edilir. Windows GUI ve yerel
+Otomatik testlerde bulut SDK importları engellenerek yerel yol doğrulanır;
+OpenAI SDK kurulu olması gerekmez. Windows GUI ve yerel
 HTTP testleri masaüstü oturumu ve localhost erişimi gerektirir. Kamera/OBS ile
 canlı smoke araçları ayrıca, isteğe bağlı çalıştırılır. Testlerdeki JSON dosyaları
 sentetik/anonymize fixture'lardır; kişisel SQLite veya gerçek diyalog arşivi değildir.
@@ -343,5 +353,5 @@ dışarıda tutar. Yalnız `.gitignore` eklemek eski commit'teki dosyayı kaldı
 GitHub için hazırlanan ilk snapshot, eski yerel geçmişi taşımayan temiz depodur.
 Orijinal çalışma klasörü ve yerel geçmiş yedekte korunmuştur.
 
-Bu özel deponun oluşturulması kodu otomatik olarak açık kaynak lisansına geçirmez.
+Deponun public olması kodu otomatik olarak açık kaynak lisansına geçirmez.
 Bağımlılıkların ve indirilen modellerin kendi lisans koşulları geçerlidir.
