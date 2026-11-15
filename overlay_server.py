@@ -37,8 +37,7 @@ class SharedOverlayState:
             store=self.manager.store;session=self.manager.session;now=time.monotonic()
             row=store.accept(session,'Manual example',now,now,time.time(),now,1,'manual')
             job=store.enqueue_translation(session,row,'Manual example','gpt-6-luna',now)
-            from core import TranslationUsage
-            store.complete_translation(job,text,now,TranslationUsage(api_called=False),duration=lifetime)
+            store.complete_translation(job,text,now,duration=lifetime)
             self.version+=1
 
     def clear(self,reason='user_stop'):

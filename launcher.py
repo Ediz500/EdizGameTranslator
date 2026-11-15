@@ -45,7 +45,7 @@ def main():
     except Exception:
         if args.self_test:
             from core import atomic_json
-            atomic_json(Path(args.report),dict(ok=False,error=sys.exc_info()[0].__name__,paid_requests=0))
+            atomic_json(Path(args.report),dict(ok=False,error=sys.exc_info()[0].__name__,cloud_sdk_loaded=False))
             raise
         report_error(*sys.exc_info())
     finally:stream.close()

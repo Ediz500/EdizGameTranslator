@@ -41,7 +41,11 @@ def export_corpus(database,limit=75):
     db=readonly(database)
     try:
         db.row_factory=sqlite3.Row
-        refs=[dict(r) for r in db.execute("SELECT id,source,translated,session,api_called FROM translation_jobs WHERE model='gpt-6-luna' AND translation_state='completed'")]
+        columns={r[1] for r in db.execute('PRAGMA table_info(translation_jobs)')}
+        # Read-only historical references; the local runtime has no SDK or
+        # billing columns. Never create them merely to export a benchmark.
+        refs=([dict(r) for r in db.execute("SELECT id,source,translated,session,api_called FROM translation_jobs WHERE model='gpt-6-luna' AND translation_state='completed'")]
+              if 'api_called' in columns else [])
         rows=[dict(r) for r in db.execute('SELECT id,session,COALESCE(canonical_text,text) AS text,confidence,first_seen_mono FROM subtitles ORDER BY session,first_seen_mono,id')]
     finally:db.close()
     from dialogue_filter import dialogue_candidates
@@ -82,6 +86,9 @@ def audit(database):
     try:
         jobs=[dict(r) for r in db.execute('''SELECT j.*,s.first_seen_mono,s.last_seen_mono
             FROM translation_jobs j JOIN subtitles s ON s.id=j.subtitle_id ORDER BY j.session,j.id''')]
+        for job in jobs:
+            job.setdefault('api_start_mono',job.get('translation_start_mono'))
+            job.setdefault('api_called',False)
         stages={}
         for name,a,b,api_only in [('ocr_accept_ms','first_seen_mono','accepted_mono',False),
                 ('queue_ms','accepted_mono','api_start_mono',False),('api_ms','api_start_mono','ready_mono',True),

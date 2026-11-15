@@ -5,7 +5,6 @@
   "capture_method": "virtual_camera",
   "ocr_profile": "bounded960_cpu2",
   "camera_config": "",
-  "model": "gpt-6-luna",
   "translation_engine": "ct2-marian",
   "local_python": "",
   "local_model_path": "",
@@ -30,13 +29,8 @@
   "monitor_index": 0,
   "font_size": 36,
   "overlay_bottom": 10,
-  "budget_try": 5000.0,
-  "usd_try": 50.0,
   "game": "Genel oyun",
   "lore": "",
   "show_desktop": true,
-  "transcript_srt": true,
-  "estimated_total_usd": 0.0,
-  "token_total_in": 0,
-  "token_total_out": 0
+  "transcript_srt": true
 }

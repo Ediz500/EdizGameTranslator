@@ -23,7 +23,7 @@ class GuiTests(unittest.TestCase):
             return Image.new('RGB',(1920,1080))
         fake_obs.read.side_effect=read
         ocr = MagicMock(return_value=SimpleNamespace(txts=['Follow me!'], scores=[.99], boxes=None))
-        with tempfile.TemporaryDirectory() as folder, patch('app.secret_get', return_value=''), patch('app.secret_save'), patch('app.config_folder', return_value=Path(folder)), patch('core.config_folder', return_value=Path(folder)), patch('rapidocr.RapidOCR', return_value=ocr), patch('app.TranslationEngine') as api, patch('app.VirtualCamera',return_value=fake_obs), patch.object(app.MainWindow,'_obs'), patch('app.messagebox.askyesno', return_value=True):
+        with tempfile.TemporaryDirectory() as folder, patch('app.secret_get', return_value=''), patch('app.secret_save'), patch('app.config_folder', return_value=Path(folder)), patch('core.config_folder', return_value=Path(folder)), patch('rapidocr.RapidOCR', return_value=ocr), patch('app.WarmNMTClient') as engine, patch('app.VirtualCamera',return_value=fake_obs), patch.object(app.MainWindow,'_obs'), patch('app.messagebox.askyesno', return_value=True):
             root = tk.Tk()
             window = app.MainWindow(root)
             self.assertFalse(window.diagnostic_mode.get())
@@ -44,7 +44,7 @@ class GuiTests(unittest.TestCase):
             root.after(30,finish_when_ready)
             timeout = root.after(5000,window.close)
             root.mainloop()
-            api.assert_not_called()
+            engine.assert_not_called()
             self.assertGreaterEqual(ocr.call_count,3)
             fake_obs.close.assert_called_once()
             with closing(sqlite3.connect(Path(folder)/'subtitles.sqlite3')) as db:
@@ -78,4 +78,4 @@ class GuiTests(unittest.TestCase):
                 self.assertIsNotNone(window.server)
             finally:
                 window.close()
-            self.assertTrue((Path(folder) / 'settings.json').exists())
+            self.assertFalse((Path(folder) / 'ledger.json').exists())

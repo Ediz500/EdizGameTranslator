@@ -6,7 +6,7 @@ from types import SimpleNamespace
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from core import BudgetLedger, ContextMemory, SubtitleTimeline, clean_ocr, choose_subtitle, key_for
+from core import SubtitleTimeline, clean_ocr, choose_subtitle, key_for
 from overlay_server import SharedOverlayState, launch_server
 
 
@@ -26,24 +26,6 @@ class CoreTests(unittest.TestCase):
         )
         self.assertEqual(choose_subtitle(r, 1000), 'Wait for me! Please!')
 
-    def test_budget(self):
-        ledger = BudgetLedger(0, 50, 5000)
-        self.assertTrue(ledger.can_spend())
-        u = ledger.record('gpt-6.1-sol', 1000, 100)
-        self.assertAlmostEqual(u.usd, .003)
-        self.assertAlmostEqual(ledger.spent_try(), .15)
-        ledger.cap_try = .1
-        self.assertFalse(ledger.can_spend())
-
-    def test_game_context_is_not_mixed_with_output(self):
-        mem = ContextMemory('Phantom Blade Zero', 'Yu’er bir karakterdir')
-        source = 'Watch out for the guards.'
-        prompt = mem.prompt(source)
-        self.assertIn('Phantom Blade Zero', prompt)
-        self.assertIn('Yu’er', prompt)
-        mem.remember('gpt-6.1-sol', source, 'Muhafızlara dikkat et.')
-        self.assertIn('Muhafızlara dikkat et.', mem.prompt('We must go.'))
-        self.assertEqual(mem.cached('gpt-6.1-sol', source), 'Muhafızlara dikkat et.')
 
     def test_srt(self):
         s = SubtitleTimeline()

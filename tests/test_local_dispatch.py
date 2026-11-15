@@ -42,7 +42,7 @@ class ConcurrentDispatchTests(unittest.TestCase):
         stop.set();t.join(2);self.assertFalse(t.is_alive())
         self.assertEqual(results,[second,first]);factory.assert_called_once()
         self.assertEqual(c.peak_active,2);self.assertFalse(errors)
-        self.assertEqual(self.store.db.execute('SELECT sum(api_called) FROM translation_jobs').fetchone()[0],0)
+        self.assertNotIn('api_called',{r[1] for r in self.store.db.execute('PRAGMA table_info(translation_jobs)')})
 
     def test_same_utterance_revisions_never_run_concurrently(self):
         row,first=self.add('We should check the')
@@ -81,9 +81,10 @@ class ConcurrentDispatchTests(unittest.TestCase):
     def test_capacity_and_missing_model_fail_without_cloud(self):
         with self.assertRaises(ValueError):validate_capacity(2,2,'cuda')
         with self.assertRaises(ValueError):validate_capacity(99,1,'cpu')
-        with patch('openai.OpenAI') as paid,patch('light_translation.subprocess.Popen') as p:
+        from cloud_guard import NoCloudImports
+        with NoCloudImports(),patch('light_translation.subprocess.Popen') as p:
             with self.assertRaises(LocalEngineError):WarmNMTClient('unused','missing-model')
-            p.assert_not_called();paid.assert_not_called()
+            p.assert_not_called()
 
 
 class SafeMemoryTests(unittest.TestCase):

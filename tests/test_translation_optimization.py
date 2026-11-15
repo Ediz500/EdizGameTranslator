@@ -30,7 +30,7 @@ class DedupRegressionTests(unittest.TestCase):
         s=SubtitleStore(':memory:')
         try:
             row=s.accept('s','Original.',0,0,0,0,.99,'test')
-            job=s.enqueue_translation('s',row,'Original.','gpt-6-luna',0)
+            job=s.enqueue_translation('s',row,'Original.','local:ct2-marian',0)
             s.refresh_pending_source('s',row,'Best observed.')
             self.assertEqual(s.claim_translation('s',.1)['source'],'Best observed.')
             s.refresh_pending_source('s',row,'Late correction.')
@@ -65,7 +65,7 @@ class DedupRegressionTests(unittest.TestCase):
         def ocr(_):return SimpleNamespace(txts=[texts[i[0]]],scores=[.99],boxes=None)
         runner=CaptureRunner(lambda:FramePacket(None,i[0],i[0]*.28,100,0),
             lambda _:SimpleNamespace(width=960,height=160),ocr,s,'s',DiagnosticLog(),lambda:None,
-            lambda row,text,at:s.enqueue_translation('s',row,text,'gpt-6-luna',at))
+            lambda row,text,at:s.enqueue_translation('s',row,text,'local:ct2-marian',at))
         try:
             runner.step();i[0]=1;runner.step()
             rows=s.db.execute('SELECT source FROM translation_jobs').fetchall()
@@ -77,14 +77,14 @@ class DedupRegressionTests(unittest.TestCase):
         s=SubtitleStore(':memory:')
         try:
             row=s.accept('s','Go!',0,0,0,0,.99,'test')
-            j=s.enqueue_translation('s',row,'Go!','gpt-6-luna',0)
+            j=s.enqueue_translation('s',row,'Go!','local:ct2-marian',0)
             s.claim_translation('s',.1)
-            self.assertEqual(s.enqueue_translation('s',row,'Go!','gpt-6-luna',.2),j)
+            self.assertEqual(s.enqueue_translation('s',row,'Go!','local:ct2-marian',.2),j)
             # A real extension after claim must not mutate the in-flight source.
-            j2=s.enqueue_translation('s',row,'Go! Stay close.','gpt-6-luna',.3)
+            j2=s.enqueue_translation('s',row,'Go! Stay close.','local:ct2-marian',.3)
             self.assertNotEqual(j,j2)
             row2=s.accept('s','Go!',1,1,1,1,.99,'test')
-            self.assertNotEqual(s.enqueue_translation('s',row2,'Go!','gpt-6-luna',1),j)
+            self.assertNotEqual(s.enqueue_translation('s',row2,'Go!','local:ct2-marian',1),j)
         finally:s.close()
 
     def test_timing_stages_and_three_independent_counters(self):
@@ -94,9 +94,9 @@ class DedupRegressionTests(unittest.TestCase):
             ids=[]
             for i in range(4):
                 r=s.accept('s','Go!',0,0,0,.1,.99,'test')
-                j=s.enqueue_translation('s',r,'Go!','gpt-6-luna',.1)
+                j=s.enqueue_translation('s',r,'Go!','local:ct2-marian',.1)
                 s.claim_translation('s',.2);s.complete_translation(j,'Git!',.5,duration=10)
-                s.record_timing(j,dict(prepare_ms=2,request_call_ms=290,result_ms=8,secret='hidden',total_ms=float('nan')))
+                s.record_timing(j,dict(processing_ms=290,roundtrip_ms=298,capacity_wait_ms=2,secret='hidden',total_ms=float('nan')))
                 ids.append(j)
             d=DisplayManager(s,'s',clock=lambda:clock[0]);state=d.snapshot()
             self.assertEqual([b['id'] for b in state['blocks']],ids[:3])
@@ -105,16 +105,6 @@ class DedupRegressionTests(unittest.TestCase):
             self.assertEqual([b['remaining'] for b in state['blocks']],[8.5,9,9])
             metrics=s.session_metrics('s')['stages_ms']
             self.assertAlmostEqual(metrics['translation_queue_ms']['p50'],100)
-            self.assertAlmostEqual(metrics['request_call_ms']['p50'],290)
+            self.assertAlmostEqual(metrics['processing_ms']['p50'],290)
             self.assertNotIn('secret',s.db.execute('SELECT metrics FROM translation_timings LIMIT 1').fetchone()[0])
         finally:s.close()
-
-    def test_api_timing_without_network(self):
-        from core import TranslationEngine,ContextMemory,BudgetLedger
-        with patch('openai.OpenAI') as sdk:
-            sdk.return_value.responses.create.return_value=SimpleNamespace(status='completed',output_text='Git!',usage=SimpleNamespace(input_tokens=10,output_tokens=2))
-            e=TranslationEngine('offline','gpt-6-luna',ContextMemory('Test',''),BudgetLedger(0,1,10))
-            e.translate('Go!')
-            self.assertIn('request_call_ms',e.last_timing);self.assertIn('result_ms',e.last_timing)
-            e.memory.remember(e.model,'Go!','Git!');e.translate('Go!')
-            self.assertTrue(e.last_timing['cache_hit']);self.assertNotIn('request_call_ms',e.last_timing)

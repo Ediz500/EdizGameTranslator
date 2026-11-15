@@ -1,6 +1,5 @@
 """Fixed-capacity dispatcher. SQLite journals work without serial completion gates."""
 from concurrent.futures import ThreadPoolExecutor
-from types import SimpleNamespace
 import threading
 import time
 
@@ -36,7 +35,7 @@ class LocalTranslationCoordinator:
                 ended=time.monotonic()
                 timing.update(total_ms=(ended-began)*1000,capacity_wait_ms=(began-job['accepted_mono'])*1000)
                 self.store.record_timing(job['id'],timing)
-                self.store.complete_translation(job['id'],text,ended,SimpleNamespace(api_called=False,usd=0))
+                self.store.complete_translation(job['id'],text,ended)
                 with self.lock:self.completed+=1
                 if not self.stop.is_set():self.on_result(job,text,ended-began,route)
             except Exception as exc:

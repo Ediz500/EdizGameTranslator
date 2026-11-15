@@ -19,7 +19,7 @@ def main():
     settings=with_region(deepcopy(DEFAULTS),'Örnek Oyun',(0.12,.64,.88,.94))
     with tempfile.TemporaryDirectory() as folder,patch('app.load_settings',return_value=settings),\
             patch('app.config_folder',return_value=Path(folder)),patch('core.config_folder',return_value=Path(folder)),\
-            patch('app.secret_get',return_value=''),patch('app.secret_save'),patch('app.TranslationEngine') as api:
+            patch('app.secret_get',return_value=''),patch('app.secret_save'),patch('app.WarmNMTClient') as api:
         root=tk.Tk();w=app.MainWindow(root);root.geometry('1120x840+120+80')
         root.attributes('-topmost',True)
         def capture(name):

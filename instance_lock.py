@@ -1,4 +1,4 @@
-"""Windows process lock: one writer for settings and budget ledger."""
+"""Windows process lock: one writer for local settings and SQLite journal."""
 import msvcrt
 
 
