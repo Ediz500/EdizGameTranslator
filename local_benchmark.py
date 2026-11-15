@@ -87,8 +87,13 @@ def audit(database):
         jobs=[dict(r) for r in db.execute('''SELECT j.*,s.first_seen_mono,s.last_seen_mono
             FROM translation_jobs j JOIN subtitles s ON s.id=j.subtitle_id ORDER BY j.session,j.id''')]
         for job in jobs:
-            job.setdefault('api_start_mono',job.get('translation_start_mono'))
-            job.setdefault('api_called',False)
+            # Old databases keep api_called DEFAULT 1. A new local job must
+            # never be counted as a historical paid request because of that
+            # inherited default. Prefer its new start clock when available.
+            start=job.get('translation_start_mono')
+            if start is not None:job['api_start_mono']=start
+            else:job.setdefault('api_start_mono',None)
+            job['api_called']=bool(job.get('api_called')) and not job['model'].startswith('local:')
         stages={}
         for name,a,b,api_only in [('ocr_accept_ms','first_seen_mono','accepted_mono',False),
                 ('queue_ms','accepted_mono','api_start_mono',False),('api_ms','api_start_mono','ready_mono',True),

@@ -79,7 +79,7 @@ print('local-only imports OK')
         with tempfile.TemporaryDirectory() as folder:
             path=Path(folder)/'history.sqlite3';store=SubtitleStore(path)
             store.db.execute('ALTER TABLE translation_jobs RENAME COLUMN translation_start_mono TO api_start_mono')
-            for name,kind in [('input_tokens','INTEGER'),('output_tokens','INTEGER'),('estimated_usd','REAL'),('api_called','INTEGER'),('cost_unknown','INTEGER')]:
+            for name,kind in [('input_tokens','INTEGER DEFAULT 0'),('output_tokens','INTEGER DEFAULT 0'),('estimated_usd','REAL DEFAULT 0'),('api_called','INTEGER DEFAULT 1'),('cost_unknown','INTEGER DEFAULT 0')]:
                 store.db.execute(f'ALTER TABLE translation_jobs ADD COLUMN {name} {kind}')
             row=store.accept('old','Original source',1,1,1,1,.99,'fixture')
             job=store.enqueue_translation('old',row,'Original source','historical-model',1)
@@ -94,11 +94,33 @@ print('local-only imports OK')
                 self.assertEqual(store.db.execute('SELECT translation_start_mono FROM translation_jobs WHERE id=?',(job,)).fetchone()[0],2)
                 new_row=store.accept('new','New source',4,4,4,4,.99,'fixture')
                 new=store.enqueue_translation('new',new_row,'New source','local:ct2-marian',4)
+                inherited=store.db.execute('SELECT input_tokens,output_tokens,estimated_usd,api_called,cost_unknown FROM translation_jobs WHERE id=?',(new,)).fetchone()
                 store.claim_translation('new',5);store.complete_translation(new,'New translation',6)
                 store.fail_translation(new,7)
-                self.assertEqual(store.db.execute('SELECT input_tokens,output_tokens,estimated_usd,api_called,cost_unknown FROM translation_jobs WHERE id=?',(new,)).fetchone(),(None,)*5)
+                self.assertEqual(store.db.execute('SELECT input_tokens,output_tokens,estimated_usd,api_called,cost_unknown FROM translation_jobs WHERE id=?',(new,)).fetchone(),inherited)
                 self.assertEqual(store.db.execute('SELECT source,translated,api_start_mono,input_tokens,output_tokens,estimated_usd,api_called,cost_unknown FROM translation_jobs WHERE id=?',(job,)).fetchone(),before)
                 store.close()
+
+    def test_historical_audit_separates_local_jobs_from_old_called_default(self):
+        from local_benchmark import audit
+        with tempfile.TemporaryDirectory() as folder:
+            path=Path(folder)/'audit.sqlite3';store=SubtitleStore(path)
+            store.db.execute('ALTER TABLE translation_jobs ADD COLUMN api_called INTEGER DEFAULT 1')
+            store.db.execute('ALTER TABLE translation_jobs ADD COLUMN api_start_mono REAL')
+            row=store.accept('local','Scout: Go!',1,1,1,1,.99,'fixture')
+            job=store.enqueue_translation('local',row,'Scout: Go!','local:ct2-marian',1)
+            store.claim_translation('local',2);store.complete_translation(job,'Git!',3)
+            old=store.accept('old','Scout: Stay here.',10,10,10,10,.99,'fixture')
+            historical=store.enqueue_translation('old',old,'Scout: Stay here.','gpt-6-luna',10)
+            store.db.execute("UPDATE translation_jobs SET translation_state='completed',display_state='completed',api_start_mono=11,translation_start_mono=NULL,ready_mono=12 WHERE id=?",(historical,))
+            store.db.commit();store.close()
+            before=hashlib.sha256(path.read_bytes()).hexdigest()
+            with NoCloudImports():result=audit(path)
+            self.assertEqual(result['stages_ms']['queue_ms']['n'],2)
+            self.assertEqual(result['stages_ms']['api_ms']['n'],1)
+            self.assertEqual(result['first_api_ms']['n'],1)
+            self.assertEqual(result['sessions'][0]['session'],'old')
+            self.assertEqual(hashlib.sha256(path.read_bytes()).hexdigest(),before)
 
     def test_new_sqlite_tracks_local_latency_without_financial_columns(self):
         store=SubtitleStore(':memory:')

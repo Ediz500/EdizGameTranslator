@@ -78,6 +78,8 @@ boyutu yaklaşık 281 MiB'dir; bu yalnız yerel build çıktısıdır, Git'e ekl
 - Yerel benchmark'ın eski kayıtlı Luna referanslarını salt okunur incelemesi
   korunur. Bu, çalışan API yolu değildir; yeni sütunsuz yerel şemadan da export
   yapılabilir. Tarihsel model adları ve anonim performans ölçümleri silinmez.
+  Eski şemanın `api_called=1` varsayılanı yerel işleri ücretli çağrı saydırmaz;
+  okuyucu yerel motor kimliğini ayırır ve yeni başlangıç zamanını tercih eder.
 
 ## Korunan hızlı yol
 
@@ -98,7 +100,7 @@ kuyruksuz gösterim veya çeviri kalitesi değişikliği yapılmadı.
 | Kontrol | Sonuç |
 |---|---|
 | Temizlik öncesi mevcut regresyonlar | 195/195 geçti |
-| SDK bulunmayan temiz Windows ortamında geçerli regresyonlar | 179/179 geçti |
+| SDK bulunmayan temiz Windows ortamında geçerli regresyonlar | 180/180 geçti |
 | Python sözdizimi, CPython 3.12 x64/Tk ve pip check | Geçti |
 | SDK/SDK HTTP modüllerinin ortamda bulunmaması | Doğrulandı |
 | Bulut importlarını engelleyerek normal GUI/yerel yol | Geçti |
@@ -108,7 +110,7 @@ kuyruksuz gösterim veya çeviri kalitesi değişikliği yapılmadı.
 | Temiz Windows EXE, bölge editörü, tek kamera, üç blok + bekleyen iş | Geçti |
 | EXE içinden gerçek CUDA çeviri ve işçinin kapanışı | Geçti |
 
-23 geçersiz bulut/fiyatlandırma testi aktif paketten çıkarıldı; 7 yeni yerel
+23 geçersiz bulut/fiyatlandırma testi aktif paketten çıkarıldı; 8 yeni yerel
 sınır/veri koruma testi eklendi. Protokol, oturum, OBS, OCR ve üçlü gösterim
 regresyonları korunup gerektiği yerde yerel motora uyarlandı. Test sayısı yapay
 olarak korunmadı. Geliştirmedeki eski test imzası ve test veritabanı handle
