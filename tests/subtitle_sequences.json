@@ -1,0 +1,10 @@
+[
+  {"name":"short", "segments":[[0,0.45,"Get down!",0.98],[0.45,0.8,"",0]], "expected":["Get down!"]},
+  {"name":"medium", "segments":[[0,2.4,"We must leave before dawn.",0.97],[2.4,3,"",0]], "expected":["We must leave before dawn."]},
+  {"name":"rapid", "segments":[[0,0.35,"Watch out!",0.98],[0.35,0.7,"Run now!",0.98],[0.7,1.05,"Follow me!",0.98],[1.05,1.5,"",0]], "expected":["Watch out!","Run now!","Follow me!"]},
+  {"name":"two_lines", "segments":[[0,1.8,"Stay close.\nWe are almost there.",0.96],[1.8,2.4,"",0]], "expected":["Stay close. We are almost there."]},
+  {"name":"partial", "segments":[[0,0.28,"We should",0.72],[0.28,0.56,"We should leave",0.72],[0.56,1.68,"We should leave now.",0.97],[1.68,2.2,"",0]], "expected":["We should leave now."]},
+  {"name":"ocr_noise", "segments":[[0,0.28,"F0llow the guards.",0.8],[0.28,0.56,"Follow the guards.",0.9],[0.56,0.84,"F0llow the guards.",0.8],[0.84,1.12,"Follow the guards.",0.9],[1.12,1.4,"F0llow the guards.",0.8],[1.4,1.7,"",0]], "expected":["Follow the guards."]},
+  {"name":"meaning_change", "segments":[[0,0.56,"I can go east.",0.98],[0.56,1.12,"I can't go east.",0.98],[1.12,1.68,"I can't go west.",0.98],[1.68,2,"",0]], "expected":["I can go east.","I can't go east.","I can't go west."]},
+  {"name":"bad_ocr", "segments":[[0,0.56,"zxq! grr 88!",0.49],[0.56,1.4,"Meet me outside.",0.98],[1.4,1.9,"",0]], "expected":["Meet me outside."]}
+]
