@@ -38,7 +38,7 @@ def model_manifest(folder,verify=True):
 
 class WarmNMTClient:
     def __init__(self,python,folder,device='cpu',compute_type='int8',workers=2,threads=2,
-                 request_timeout=15,load_timeout=120,on_start=None):
+                 request_timeout=15,load_timeout=120,on_start=None,beam_size=1):
         validate_capacity(workers,threads,device)
         model_manifest(folder,verify=False)
         if not python or not Path(python).is_file():raise LocalEngineError('Yerel motor Python yolu bulunamadı.')
@@ -49,7 +49,7 @@ class WarmNMTClient:
         env=dict(os.environ,HF_HUB_OFFLINE='1',TRANSFORMERS_OFFLINE='1',PYTHONUTF8='1',PYTHONIOENCODING='utf-8',
                  TOKENIZERS_PARALLELISM='false')
         self.process=subprocess.Popen([str(python),'-u',str(script),'--worker','--path',str(Path(folder).resolve()),
-            '--device',device,'--compute-type',compute_type,'--workers',str(workers),'--threads',str(threads)],
+            '--device',device,'--compute-type',compute_type,'--workers',str(workers),'--threads',str(threads),'--beam-size',str(beam_size)],
             stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,text=True,encoding='utf-8',
             env=env,creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0))
         if on_start:on_start(self.process.pid)
@@ -77,6 +77,8 @@ class WarmNMTClient:
                 if f is not None and not f.done():
                     if 'error' in response:f.set_exception(LocalEngineError(response['error']))
                     else:f.set_result(response)
+                if response.get('fatal'):
+                    self._fail_all('Yerel model hata verdi; süreç durdurulmalı.');break
         finally:self._fail_all('Yerel motor kapandı; otomatik bulut fallback yapılmadı.')
 
     def translate(self,text):
@@ -122,7 +124,11 @@ class CT2Translator:
             # directory handles alive; never change the system PATH/CUDA install.
             for package in ('cublas','cuda_runtime'):
                 directory=Path(sys.prefix)/'Lib'/'site-packages'/'nvidia'/package/'bin'
-                if directory.is_dir():self.dll_directories.append(os.add_dll_directory(str(directory)))
+                if directory.is_dir():
+                    self.dll_directories.append(os.add_dll_directory(str(directory)))
+                    # CTranslate2 also uses legacy LoadLibrary lookup. This is
+                    # the worker's process environment, never the system PATH.
+                    os.environ['PATH']=str(directory)+os.pathsep+os.environ.get('PATH','')
         import ctranslate2
         import sentencepiece
         supported=ctranslate2.get_supported_compute_types(args.device)
@@ -133,13 +139,14 @@ class CT2Translator:
         self.source=sentencepiece.SentencePieceProcessor(model_proto=(folder/'source.spm').read_bytes())
         self.target=sentencepiece.SentencePieceProcessor(model_proto=(folder/'target.spm').read_bytes())
         self.load_ms=(time.perf_counter()-began)*1000
+        self.beam_size=args.beam_size
         self.runtime=dict(ctranslate2=ctranslate2.__version__,device=args.device,compute_type=args.compute_type,
-                          workers=args.workers,threads=args.threads)
+                          workers=args.workers,threads=args.threads,beam_size=args.beam_size)
 
     def translate(self,text):
         began=time.perf_counter();tokens=self.source.encode(text,out_type=str)+['</s>']
         if len(tokens)>256:raise ValueError('Kaynak token sınırını aşıyor; sessiz kırpma yapılmadı.')
-        answer=self.model.translate_batch([tokens],beam_size=1,max_decoding_length=256,
+        answer=self.model.translate_batch([tokens],beam_size=self.beam_size,max_decoding_length=256,
             max_input_length=0,return_end_token=False)[0].hypotheses[0]
         result=self.target.decode(answer).strip()
         return dict(text=result,complete=bool(result) and len(answer)<256,output_tokens=len(answer),
@@ -162,7 +169,7 @@ def worker(args):
                 text=request['text']
                 if not isinstance(text,str) or not text.strip() or len(text)>360:raise ValueError('Invalid source')
                 send(dict(id=request['id'],**engine.translate(text)))
-            except Exception as exc:send(dict(id=request.get('id'),error=f'{type(exc).__name__}: {str(exc)[:300]}'))
+            except Exception as exc:send(dict(id=request.get('id'),error=f'{type(exc).__name__}: {str(exc)[:300]}',fatal=isinstance(exc,RuntimeError)))
             finally:slots.release()
         with ThreadPoolExecutor(max_workers=args.workers) as pool:
             for line in sys.stdin:
@@ -177,4 +184,5 @@ if __name__=='__main__':
     p=argparse.ArgumentParser();p.add_argument('--worker',required=True,action='store_true')
     p.add_argument('--path',required=True);p.add_argument('--device',choices=['cpu','cuda'],default='cpu')
     p.add_argument('--compute-type',default='int8');p.add_argument('--workers',type=int,default=2)
-    p.add_argument('--threads',type=int,default=2);worker(p.parse_args())
+    p.add_argument('--threads',type=int,default=2);p.add_argument('--beam-size',type=int,choices=[1,2,4],default=1)
+    worker(p.parse_args())

@@ -52,7 +52,8 @@ class LocalTranslationCoordinator:
             began=time.monotonic()
             s=self.settings
             self.engine=self.engine_factory(s['local_python'],s['local_model_path'],device=s['local_device'],
-                compute_type=s['local_compute_type'],workers=s['local_workers'],threads=s['local_threads'])
+                compute_type=s['local_compute_type'],workers=s['local_workers'],threads=s['local_threads'],
+                beam_size=s.get('local_beam_size',4))
             self.init_ms=(time.monotonic()-began)*1000
             with ThreadPoolExecutor(max_workers=s['local_workers'],thread_name_prefix='local-dispatch') as pool:
                 futures=[pool.submit(self._loop) for _ in range(s['local_workers'])]

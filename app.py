@@ -451,7 +451,8 @@ class MainWindow:
             engine=None
             try:
                 engine=WarmNMTClient(s['local_python'],s['local_model_path'],device=s['local_device'],
-                    compute_type=s['local_compute_type'],workers=s['local_workers'],threads=s['local_threads'])
+                    compute_type=s['local_compute_type'],workers=s['local_workers'],threads=s['local_threads'],
+                    beam_size=s.get('local_beam_size',4))
                 began=time.monotonic();r=engine.translate(source.strip())
                 self.post_session(session_id,'ai_demo',r['text'],source.strip(),time.monotonic()-began,0)
             except Exception as exc:self.post_session(session_id,'error',str(exc))
@@ -535,7 +536,7 @@ class MainWindow:
         self.game_combo.configure(state='disabled')
         self.connection_var.set('OBS: Denetleniyor     Kamera: Açılıyor     AI: '+('Kapalı' if diagnostic else 'Bekliyor'))
         self.status_var.set("Başlatılıyor: OBS bağlantısı ve OCR hazırlanıyor...")
-        self.log(f"Çeviri başlıyor: {s['game']} · {s['model']} · kaynak: {s['obs_source']}")
+        self.log(f"Çeviri başlıyor: {s['game']} · yerel {s['translation_engine']} · kaynak: {s['obs_source']}")
         s['_ready']=threading.Event()
         self.active_capture_settings=s
         if not diagnostic:self._spawn(self.translate_worker, s, self.stop_evt, session_id, jobs, memory)
@@ -724,7 +725,7 @@ class MainWindow:
         from core import atomic_json
         try:
             metrics=self.subtitle_store.session_metrics(session)
-            if self.local_coordinator:metrics['local_engine']=self.local_coordinator.summary()
+            if getattr(self,'local_coordinator',None):metrics['local_engine']=self.local_coordinator.summary()
             atomic_json(config_folder()/'last_session_metrics.json',metrics)
         except OSError:self.log('Oturum metrikleri diske yazılamadı; SQLite kayıtları korunuyor.')
         self.metrics_saved_session=session

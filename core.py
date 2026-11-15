@@ -33,6 +33,7 @@ DEFAULTS: dict[str, Any] = {
     "local_compute_type": "int8",
     "local_workers": 2,
     "local_threads": 2,
+    "local_beam_size": 4,
     "translation_pack": "",
     "capture_schedule": "fixed_fast",
     "fixed_ocr_interval": 0.04,
@@ -63,6 +64,8 @@ DEFAULTS: dict[str, Any] = {
 
 def config_folder() -> Path:
     import os
+    if os.environ.get('EDIZ_CONFIG_DIR'):
+        return Path(os.environ['EDIZ_CONFIG_DIR']).expanduser().resolve()
     root = Path(os.environ.get("APPDATA") or Path.home())
     return root / "EdizGameTranslator"
 
