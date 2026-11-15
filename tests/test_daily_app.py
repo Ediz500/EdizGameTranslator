@@ -161,6 +161,10 @@ class DailyGuiTests(unittest.TestCase):
         self.sdk.OpenAI.return_value.responses.create.return_value=SimpleNamespace(
             status='completed',output_text='Beni takip et!',usage=SimpleNamespace(input_tokens=100,output_tokens=10))
         self.stack.enter_context(patch.dict(sys.modules,{'openai':self.sdk}))
+        self.local=MagicMock();self.local.closed=False
+        self.local.translate.return_value=dict(text='Beni takip et!',complete=True,processing_ms=1)
+        self.local_factory=self.stack.enter_context(patch('app.WarmNMTClient',return_value=self.local))
+        self.stack.enter_context(patch('app.model_manifest',return_value=(self.folder,{})))
         self.root=tk.Tk();self.w=app.MainWindow(self.root)
         config={'name':'Test','virtual-camera':{'type2':2,'source':'Raw'},
                 'sources':[{'name':'Raw','id':'dshow_input','settings':{'video_device_id':'raw-card'},'filters':[]}]}
@@ -183,9 +187,10 @@ class DailyGuiTests(unittest.TestCase):
         self.assertTrue(self.w.running);self.assertEqual(self.w.start_btn['text'],'■  DURDUR')
         with urlopen('http://127.0.0.1:8788/state',timeout=2) as r:
             self.assertEqual(json.load(r)['text'],'Beni takip et!')
-        self.assertEqual(self.sdk.OpenAI.return_value.responses.create.call_count,1)
+        self.assertEqual(self.local.translate.call_count,1)
+        self.sdk.OpenAI.assert_not_called()
         self.device.assert_called_once();self.obs.frame.assert_not_called()
-        self.assertGreater(self.w.ledger.usd,0);self.assertFalse(self.w.ledger.pending)
+        self.assertEqual(self.w.ledger.usd,0);self.assertFalse(self.w.ledger.pending)
         with closing(sqlite3.connect(self.folder/'subtitles.sqlite3')) as db:
             self.assertEqual(db.execute('SELECT status,translated FROM subtitles').fetchall(),[('translated','Beni takip et!')])
 
@@ -198,20 +203,20 @@ class DailyGuiTests(unittest.TestCase):
     def test_simultaneous_speakers_have_separate_requests(self):
         self.ocr.return_value=SimpleNamespace(txts=['Scout: Stay close.','Pilot: I see them.'],scores=[.99,.99],
             boxes=[[[200,20],[760,20],[760,40],[200,40]],[[200,80],[760,80],[760,100],[200,100]]])
-        self.w.start();requests=self.sdk.OpenAI.return_value.responses.create
+        self.w.start();requests=self.local.translate
         self.wait(lambda:requests.call_count==2)
         for call in requests.call_args_list:
-            current=call.kwargs['input'].split('YENİ İNGİLİZCE ALTYAZI:\n')[-1]
-            self.assertNotEqual('Scout:' in current,'Pilot:' in current)
+            self.assertIn(call.args[0],('Stay close.','I see them.'))
+        self.sdk.OpenAI.assert_not_called()
         with closing(sqlite3.connect(self.folder/'subtitles.sqlite3')) as db:
             self.assertEqual(db.execute('SELECT COUNT(*) FROM subtitles').fetchone()[0],2)
 
     def test_route_failure_during_slow_api_clears_overlay_and_hides_result(self):
         entered=threading.Event();release=threading.Event()
-        def slow(**kw):
+        def slow(source):
             entered.set();release.wait(3)
-            return SimpleNamespace(status='completed',output_text='OLD',usage=SimpleNamespace(input_tokens=100,output_tokens=10))
-        self.sdk.OpenAI.return_value.responses.create.side_effect=slow
+            return dict(text='OLD',complete=True,processing_ms=1)
+        self.local.translate.side_effect=slow
         self.w.start();self.wait(entered.is_set)
         before=self.ocr.call_count
         self.wait(lambda:self.ocr.call_count>before)  # Capture/OCR did not wait for AI.
@@ -256,34 +261,39 @@ class DailyGuiTests(unittest.TestCase):
         remaining=self.root.tk.call('after','info')
         self.assertNotIn(first,remaining);self.assertNotIn(second,remaining)
 
-    def test_native_read_clock_starts_even_if_unacknowledged_browser_is_polling(self):
+    def test_native_clock_waits_for_browser_when_both_renderers_are_active(self):
         self.w.overlay_state.set('Yerel görüntü',10)
         self.w.overlay_state.browser_seen=time.monotonic()
         self.w.overlay.enabled=True
         with patch.object(self.w.overlay,'render_blocks'):
             self.w.pump()
+        state=self.w.overlay_state.snapshot()
+        self.assertIsNone(state['blocks'][0]['started'])
+        self.w.overlay_state.ack([state['blocks'][0]['id']],state['generation'])
         self.assertIsNotNone(self.w.overlay_state.snapshot()['blocks'][0]['started'])
 
-    def test_model_changes_apply_next_session_without_mixing_active_job_prices(self):
+    def test_legacy_cloud_preference_is_preserved_without_affecting_local_engine(self):
         entered=threading.Event();release=threading.Event()
-        def slow(**kw):
+        def slow(source):
             entered.set();release.wait(3)
-            return SimpleNamespace(status='completed',output_text='Çeviri',usage=SimpleNamespace(input_tokens=100,output_tokens=10))
-        self.sdk.OpenAI.return_value.responses.create.side_effect=slow
+            return dict(text='Çeviri',complete=True,processing_ms=1)
+        self.local.translate.side_effect=slow
         self.w.start();self.wait(entered.is_set)
         try:
             self.w.model.set('gpt-6.1-terra');self.w.save_preferences()
             self.ocr.return_value=SimpleNamespace(txts=['Head towards the bridge!'],scores=[.99],boxes=None)
         finally:release.set()
-        self.wait(lambda:self.sdk.OpenAI.return_value.responses.create.call_count>=2)
-        self.assertTrue(all(c.kwargs['model']=='gpt-6-luna' for c in self.sdk.OpenAI.return_value.responses.create.call_args_list))
+        self.wait(lambda:self.local.translate.call_count>=2)
+        self.local_factory.assert_called_once();self.sdk.OpenAI.assert_not_called()
         self.assertEqual(self.w.settings['model'],'gpt-6.1-terra')
 
-    def test_locked_budget_prevents_live_camera_and_api_start(self):
+    def test_historical_locked_cloud_budget_does_not_block_local_translation(self):
         self.w.ledger.blocked=True
         self.w.start()
-        self.assertFalse(self.w.running)
-        self.device.assert_not_called();self.sdk.OpenAI.assert_not_called()
+        self.wait(lambda:self.w.overlay_state.current()=='Beni takip et!')
+        self.assertTrue(self.w.running)
+        self.assertTrue(self.w.ledger.blocked);self.assertEqual(self.w.ledger.usd,0)
+        self.sdk.OpenAI.assert_not_called()
 
     def test_ready_result_in_same_session_is_not_expired_by_ocr_generation(self):
         self.w.running=True;self.w.latest_seq=4;self.w.session_id=2
@@ -294,11 +304,11 @@ class DailyGuiTests(unittest.TestCase):
 
     def test_translation_survives_old_five_second_policy_and_ocr_disappearance(self):
         self.w.settings['translation_max_age']=.01
-        def response(**kw):
+        def response(source):
             time.sleep(.08)
-            return SimpleNamespace(status='completed',output_text='Late',usage=SimpleNamespace(input_tokens=100,output_tokens=10))
-        self.sdk.OpenAI.return_value.responses.create.side_effect=response
-        self.w.start();self.wait(lambda:self.sdk.OpenAI.return_value.responses.create.call_count>0)
+            return dict(text='Late',complete=True,processing_ms=80)
+        self.local.translate.side_effect=response
+        self.w.start();self.wait(lambda:self.local.translate.call_count>0)
         def saved():
             with closing(sqlite3.connect(self.folder/'subtitles.sqlite3')) as db:
                 return db.execute('SELECT status FROM subtitles').fetchone()[0]=='translated'

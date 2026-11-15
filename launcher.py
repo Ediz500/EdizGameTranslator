@@ -13,6 +13,9 @@ def main():
     parser.add_argument('--real-camera',action='store_true')
     parser.add_argument('--report',default='PACKAGE_CHECK.json')
     parser.add_argument('--overlay-image')
+    parser.add_argument('--local-python')
+    parser.add_argument('--local-model')
+    parser.add_argument('--local-device',choices=['cpu','cuda'],default='cpu')
     args=parser.parse_args()
     from core import config_folder
     folder=Path(args.report).resolve().parent if args.self_test else config_folder()/'logs'

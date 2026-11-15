@@ -26,6 +26,20 @@ DEFAULTS: dict[str, Any] = {
     "ocr_profile": "bounded960_cpu2",
     "camera_config": "",
     "model": DEFAULT_MODEL,
+    "translation_engine": "ct2-marian",
+    "local_python": "",
+    "local_model_path": "",
+    "local_device": "cpu",
+    "local_compute_type": "int8",
+    "local_workers": 2,
+    "local_threads": 2,
+    "local_beam_size": 4,
+    "translation_pack": "",
+    "capture_schedule": "fixed_fast",
+    "fixed_ocr_interval": 0.04,
+    "change_check_interval": 0.02,
+    "full_ocr_interval": 0.15,
+    "display_transport": "sse",
     "crop_left": 0,
     "crop_top": 65,
     "crop_right": 100,
@@ -50,6 +64,8 @@ DEFAULTS: dict[str, Any] = {
 
 def config_folder() -> Path:
     import os
+    if os.environ.get('EDIZ_CONFIG_DIR'):
+        return Path(os.environ['EDIZ_CONFIG_DIR']).expanduser().resolve()
     root = Path(os.environ.get("APPDATA") or Path.home())
     return root / "EdizGameTranslator"
 

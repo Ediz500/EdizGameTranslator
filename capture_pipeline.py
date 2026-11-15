@@ -126,13 +126,14 @@ class Metrics:
 
 class CaptureRunner:
     def __init__(self, frame, crop, ocr, store, session, diagnostic, on_change,
-                 on_accept, interval=.28):
-        if not math.isfinite(interval) or not .15 <= interval <= 5:
-            raise ValueError('OCR interval must be 0.15–5 seconds')
+                 on_accept, interval=.28, change_gate=None):
+        if not math.isfinite(interval) or not .01 <= interval <= 5:
+            raise ValueError('OCR interval must be 0.01–5 seconds')
         self.frame, self.crop, self.ocr = frame, crop, ocr
         self.store, self.session, self.diagnostic = store, session, diagnostic
         self.on_change, self.on_accept = on_change, on_accept
         self.interval = interval
+        self.change_gate=change_gate
         self.gate = SubtitleGate()  # Legacy rule retained for comparison tests.
         self.tracker = ActiveSubtitles()
         self.foreground = None
@@ -157,6 +158,14 @@ class CaptureRunner:
             acquisition_ms = packet.read_ms
         sample_time = packet.captured_mono if packet else received
         region = self.crop(image)
+        change_started=time.perf_counter()
+        if self.change_gate is not None:
+            run,why,fraction=self.change_gate.should_ocr(region,sample_time)
+            change_ms=(time.perf_counter()-change_started)*1000
+            self.diagnostic.write('image_check',session=self.session,captured_mono=sample_time,
+                sequence=packet.sequence if packet else None,checked_mono=time.perf_counter(),
+                change_check_ms=change_ms,ocr_requested=run,reason=why,changed_fraction=fraction)
+            if not run:return max(0,self.change_gate.check_interval-(time.perf_counter()-start))
         ocr_start = time.perf_counter()
         result = self.ocr(region)
         ocr_end = time.perf_counter()
@@ -165,6 +174,8 @@ class CaptureRunner:
             return 0
         candidates, evidence = dialogue_candidates(result, region.width, getattr(region,'height',0))
         actions = self.tracker.update(candidates,sample_time)
+        if self.change_gate is not None:
+            self.change_gate.confirm=any(not a.track.accepted and a.candidate.confidence>=.65 for a in actions)
         primary = max(actions,key=lambda a:a.candidate.box[3] if a.candidate.box else a.candidate.indices[-1] if a.candidate.indices else 0) if actions else None
         text = primary.candidate.text if primary else ''
         confidence = primary.candidate.confidence if primary else 0
@@ -248,13 +259,14 @@ class CaptureRunner:
                              subtitle_id=a.track.row,action=a.reason,new_canonical=a.new,dispatch=a.dispatch) for a in actions],
             filter_evidence=evidence, frame_sequence=packet.sequence if packet else self.metrics.count,
             skipped_frames=packet.skipped if packet else 0, image_width=image.width if hasattr(image,'width') else None,
+            capture_stages=packet.source_metrics if packet else None,
             raw_scores=raw_scores,
             text=text, confidence=confidence, reason=decision.reason,
             selection_reason='selected' if text else ('filtered_out' if getattr(result, 'txts', None) else 'no_ocr_text'),
             accepted=decision.accepted, first_seen=decision.first_seen,
             observed_duration_ms=(sample_time-decision.first_seen)*1000,
             subtitle_id=self.active_id, **dict(zip(self.metrics.samples, values)))
-        return max(0, self.interval - (time.perf_counter()-start))
+        return max(0, (self.change_gate.check_interval if self.change_gate else self.interval) - (time.perf_counter()-start))
 
     def run(self, stop):
         try:
@@ -269,4 +281,5 @@ class CaptureRunner:
                 self.diagnostic.write('subtitle_end', subtitle_id=self.active_id,
                     observed_duration_ms=(self.active_last-self.active_first)*1000,
                     end_mono=None, end_reason='stopped_lower_bound')
-            self.diagnostic.write('summary', session=self.session, **self.metrics.summary())
+            self.diagnostic.write('summary', session=self.session, **self.metrics.summary(),
+                                  image_changes=self.change_gate.summary() if self.change_gate else None)

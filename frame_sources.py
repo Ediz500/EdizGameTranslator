@@ -12,6 +12,7 @@ class FramePacket:
     captured_utc: float
     read_ms: float
     skipped: int = 0
+    source_metrics: dict | None = None
 
 
 class LatestFrames:
@@ -35,7 +36,8 @@ class LatestFrames:
                 began=time.perf_counter()
                 image=source.read()
                 now=time.perf_counter(); seq+=1
-                packet=FramePacket(image,seq,now,time.time(),(now-began)*1000)
+                packet=FramePacket(image,seq,now,time.time(),(now-began)*1000,
+                                   source_metrics=getattr(source,'last_timing',None))
                 with self.condition:
                     self.latest=packet
                     self.condition.notify_all()
@@ -59,7 +61,7 @@ class LatestFrames:
                 if self.latest is not None and self.latest.sequence>self.consumed:
                     p=self.latest
                     packet=FramePacket(p.image,p.sequence,p.captured_mono,p.captured_utc,p.read_ms,
-                                       max(0,p.sequence-self.consumed-1))
+                                       max(0,p.sequence-self.consumed-1),p.source_metrics)
                     self.consumed=p.sequence
                     return packet
                 self.condition.wait(.05)

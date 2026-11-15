@@ -5,6 +5,7 @@ for package in ('rapidocr','onnxruntime','cv2','pygrabber','comtypes','openai','
     d,b,h=collect_all(package);datas+=d;binaries+=b;hidden+=h
 hidden+=['keyring.backends.Windows','win32ctypes.pywin32.win32cred','package_checks']
 datas+=copy_metadata('keyring')
+datas+=[('light_translation.py','.')]
 a=Analysis(['launcher.py'],pathex=[],binaries=binaries,datas=datas,
     hiddenimports=hidden,hookspath=[],hooksconfig={},runtime_hooks=[],
     excludes=['torch','paddle','tensorflow','matplotlib','pytest','IPython','notebook'],noarchive=False)

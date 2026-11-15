@@ -95,7 +95,15 @@ def build_ui(w):
              'capture_width':'capture_width','ocr_profile':'ocr_profile','camera_config':'camera_config'}
     for attr,key in strings.items():setattr(w,attr,tk.StringVar(value=str(s[key])))
     w.obs_password=tk.StringVar(value=w._get_secret('obs_password'))
-    w.api_key=tk.StringVar(value=w._get_secret('openai_api_key'))
+    w.api_key=tk.StringVar(value='')  # Historical key stays untouched in the OS vault.
+    w.local_engine=tk.StringVar(value=s['translation_engine'])
+    w.local_python=tk.StringVar(value=s['local_python'])
+    w.local_model_path=tk.StringVar(value=s['local_model_path'])
+    w.local_device=tk.StringVar(value=s['local_device'])
+    w.local_compute=tk.StringVar(value=s['local_compute_type'])
+    w.local_workers=tk.StringVar(value=str(s['local_workers']))
+    w.local_threads=tk.StringVar(value=str(s['local_threads']))
+    w.capture_schedule=tk.StringVar(value=s['capture_schedule'])
     w.show_desktop=tk.BooleanVar(value=s['show_desktop'])
     w.diagnostic_mode=tk.BooleanVar(value=False);w.diagnostic_logs=tk.BooleanVar(value=False)
     w.crop_vars={k:tk.StringVar(value=str(s[k])) for k in CROP_KEYS}
@@ -133,16 +141,19 @@ def build_ui(w):
         tk.Label(last,textvariable=var,bg=CARD,fg=color,wraplength=650,justify='left',anchor='w',font=('Segoe UI',11)).pack(fill='x')
     settings=pages['Ayarlar'].body
     ttk.Label(settings,text='Ayarlar',font=('Segoe UI',23,'bold')).pack(anchor='w',pady=(0,18))
-    api=card(settings,'AI ve bütçe','Anahtar Windows Kimlik Bilgisi Yöneticisi’nde saklanır.')
-    field(api,'OpenAI API anahtarı',w.api_key,secret=True)
+    api=card(settings,'Yerel çeviri','Model ayrı süreçte bir kez yüklenir. Otomatik indirme ve bulut fallback kapalıdır.')
+    field(api,'Yerel motor Python.exe',w.local_python)
+    field(api,'Model klasörü',w.local_model_path)
+    ttk.Button(api,text='Model klasörünü seç…',command=w._choose_local_model).pack(anchor='w')
     r=row(api);label(r,'Çeviri modeli').pack(side='left')
-    ttk.Combobox(r,textvariable=w.model,values=list(PRICE_PER_MILLION),state='readonly',width=23).pack(side='right')
+    ttk.Combobox(r,textvariable=w.local_engine,values=['ct2-marian','argos-ct2'],state='readonly',width=23).pack(side='right')
     r=row(api)
-    for title,var in [('Bütçe limiti (TL)',w.budget),('USD / TRY',w.usd_try)]:
-        label(r,title).pack(side='left',padx=(0,8));ttk.Entry(r,textvariable=var,width=9).pack(side='left',padx=(0,18))
+    for title,var,values in [('Aygıt',w.local_device,['cpu','cuda']),('Hesaplama',w.local_compute,['int8','int8_float16','float32'])]:
+        label(r,title).pack(side='left',padx=(0,8));ttk.Combobox(r,textvariable=var,values=values,state='readonly',width=14).pack(side='left',padx=(0,18))
+    field(api,'Eşzamanlı çeviri (CPU 1–4 / GPU 1)',w.local_workers)
+    field(api,'İşçi başına CPU iş parçacığı',w.local_threads)
     w.cost_var=tk.StringVar()
     tk.Label(api,textvariable=w.cost_var,bg=CARD,fg=MUTED,wraplength=650,justify='left',anchor='w',font=('Segoe UI',9)).pack(fill='x',pady=6)
-    ttk.Button(api,text='API anahtarını sil',command=w.forget_api_key).pack(anchor='w')
     output=card(settings,'Altyazı görünümü','OBS Browser Source adresi ve mevcut TV/yayın düzeni korunur.')
     r=row(output);field(output,'Yazı boyutu',w.font_var);field(output,'Alttan mesafe (%)',w.bottom_var)
     ttk.Checkbutton(output,text='Windows monitöründe de göster',variable=w.show_desktop).pack(anchor='w')
@@ -154,7 +165,7 @@ def build_ui(w):
     ttk.Checkbutton(tools,text='API’siz OCR tanılama modu',variable=w.diagnostic_mode).pack(anchor='w')
     ttk.Checkbutton(tools,text='Ayrıntılı yerel günlük (hassas OCR metni içerir)',variable=w.diagnostic_logs).pack(anchor='w')
     r=row(tools)
-    for title,cmd in [('OCR testi',w.test_ocr),('AI testi · ücretli',w.test_ai),('Örnek altyazı',w.demo)]:
+    for title,cmd in [('OCR testi',w.test_ocr),('Yerel çeviri testi',w.test_ai),('Örnek altyazı',w.demo)]:
         ttk.Button(r,text=title,command=cmd).pack(side='left',padx=(0,8))
     w.advanced_open=tk.BooleanVar(value=False)
     adv=card(settings,'Gelişmiş ayarlar')
@@ -168,6 +179,8 @@ def build_ui(w):
     field(details,'OBS koleksiyon dosyası',w.camera_config)
     ttk.Button(details,text='Koleksiyon JSON dosyasını seç…',command=w._choose_camera_config).pack(anchor='w',pady=5)
     field(details,'OCR aralığı (sn)',w.interval)
+    r=row(details);label(r,'OCR planı').pack(side='left')
+    ttk.Combobox(r,textvariable=w.capture_schedule,values=['fixed_fast','adaptive'],state='readonly').pack(side='right')
     label(details,'Doğrulanmış yapılandırma: 960 × 540 · bounded960_cpu2',9,MUTED).pack(anchor='w',pady=5)
     label(details,'Mevcut oyun bağlamı / terim notları',10).pack(anchor='w')
     w.lore_text=tk.Text(details,height=3,wrap='word',bg='#223246',fg=INK,insertbackground=INK,relief='flat',font=('Segoe UI',10))

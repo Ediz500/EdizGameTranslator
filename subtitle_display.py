@@ -23,9 +23,10 @@ def reading_seconds(text='',*,chars=None,words=None):
 
 
 class DisplayManager:
-    def __init__(self,store,session,clock=time.monotonic):
+    def __init__(self,store,session,clock=time.monotonic,ready_first=False):
         self.store,self.session,self.clock=store,session,clock
         self.active=[];self.last=clock();self.closed=False
+        self.ready_first=ready_first;self.browser_required=False
 
     def _advance(self,now):
         elapsed=max(0,now-self.last);self.last=now
@@ -39,7 +40,7 @@ class DisplayManager:
         now=self.clock();self._advance(now)
         if not self.closed:
             while len(self.active)<READING.slots:
-                job=self.store.offer_next(self.session,now)
+                job=self.store.offer_next(self.session,now,self.ready_first)
                 if job is None:break
                 self.active.append(dict(**job,remaining=job['duration'],speed=1,started=None))
         stats=self.store.queue_stats(self.session)
@@ -52,6 +53,9 @@ class DisplayManager:
         now=self.clock();self._advance(now)
         for b in self.active:
             if b['id']==job and not self.closed:
+                if renderer=='tk_render_submitted' and self.browser_required:
+                    self.store.ack_observation(job,now,renderer)
+                    return False
                 first=b['started'] is None
                 if first:b['started']=now
                 self.store.display_event(job,'visible',now,renderer)

@@ -10,10 +10,10 @@ html,body{margin:0;background:transparent;overflow:hidden;width:100%;height:100%
 .track{height:2px;background:#ffffff24;flex:1}.fill{height:100%;background:#7ad9c7;transform-origin:left}.timer{min-width:34px;text-shadow:none}
 </style></head><body><div id="subs"></div><script>
 const nodes=new Map(),reported=new Set(),root=document.getElementById('subs');let generation='',frames=[];
+const USE_SSE=false;
 function reset(){nodes.clear();reported.clear();root.replaceChildren();frames=[]}
 async function ack(ids,g){try{const r=await fetch('/ack',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({generation:g,ids})});if(r.ok&&g===generation)ids.forEach(id=>reported.add(id))}catch(e){}}
-async function tick(){try{
- const r=await fetch('/state',{cache:'no-store'});if(!r.ok)throw Error('offline');const s=await r.json();
+function apply(s){
  if(s.generation!==generation){reset();generation=s.generation}
  root.style.bottom=s.bottom+'%';root.style.fontSize=s.font+'px';
  const ids=new Set(s.blocks.map(b=>b.id)),ackIds=[];
@@ -30,9 +30,17 @@ async function tick(){try{
  }if(!reported.has(b.id))ackIds.push(b.id)}
  const g=generation;
  if(ackIds.length&&document.visibilityState==='visible')requestAnimationFrame(()=>requestAnimationFrame(()=>{if(g===generation)ack(ackIds,g)}));
+}
+async function tick(){try{
+ const r=await fetch('/state',{cache:'no-store'});if(!r.ok)throw Error('offline');apply(await r.json());
 }catch(e){reset()}setTimeout(tick,100)}
+function start(){if(USE_SSE&&window.EventSource){
+ const events=new EventSource('/events');
+ events.onmessage=e=>{try{apply(JSON.parse(e.data))}catch(e){reset()}};
+ events.onerror=()=>{events.close();reset();tick()};
+}else tick()}
 function animate(){for(const b of frames){const n=nodes.get(b.id);if(!n)continue;
  let rem=Math.max(0,b.remaining-(b.started===null?0:(performance.now()-b.received)/1000*b.speed));
  n.fill.style.transform='scaleX('+Math.min(1,rem/b.duration)+')';n.timer.textContent=rem.toFixed(1)+' s';
-}requestAnimationFrame(animate)}tick();animate();
+}requestAnimationFrame(animate)}start();animate();
 </script></body></html>'''

@@ -10,6 +10,7 @@ class SubtitleStore:
     def __init__(self, path):
         Path(path).parent.mkdir(parents=True, exist_ok=True)
         self.lock = threading.RLock()
+        self.condition=threading.Condition(self.lock)
         self.db = sqlite3.connect(path, timeout=3, check_same_thread=False)
         self.db.execute('PRAGMA foreign_keys=ON')
         self.db.execute('PRAGMA journal_mode=WAL')
@@ -61,6 +62,9 @@ class SubtitleStore:
             seen_mono REAL NOT NULL,PRIMARY KEY(job_id,renderer))''')
         self.db.execute('''CREATE TABLE IF NOT EXISTS translation_timings (
             job_id INTEGER PRIMARY KEY REFERENCES translation_jobs(id), metrics TEXT NOT NULL)''')
+        self.db.execute('''CREATE TABLE IF NOT EXISTS transport_events (
+            job_id INTEGER NOT NULL REFERENCES translation_jobs(id),transport TEXT NOT NULL,
+            sent_mono REAL NOT NULL,PRIMARY KEY(job_id,transport))''')
         self.db.execute("UPDATE translation_jobs SET display_state='cancelled',cancel_reason='process_restart' WHERE display_state NOT IN ('completed','cancelled','skipped')")
         self.db.execute("UPDATE translation_jobs SET translation_state='interrupted' WHERE translation_state IN ('queued','translating')")
         self.db.execute('PRAGMA user_version=3')
@@ -134,13 +138,14 @@ class SubtitleStore:
                 (session,subtitle_id,source,speaker,model,accepted_mono,updated_utc) VALUES (?,?,?,?,?,?,?)''',
                 (session,row,source,speaker,model,accepted,time.time())).lastrowid
             self.db.execute("UPDATE subtitles SET status='queued' WHERE id=?",(row,))
+            self.condition.notify_all()
             return job
 
     def record_timing(self,job,metrics):
         # Explicit numeric timings only; never persist SDK headers or credentials.
         import math
         safe={k:float(v) for k,v in metrics.items() if k in
-              ('prepare_ms','request_call_ms','result_ms','total_ms','engine_init_ms')
+              ('prepare_ms','request_call_ms','result_ms','total_ms','engine_init_ms','processing_ms','roundtrip_ms','capacity_wait_ms')
               and isinstance(v,(int,float)) and math.isfinite(v) and v>=0}
         with self.lock,self.db:
             self.db.execute('INSERT OR REPLACE INTO translation_timings VALUES (?,?)',
@@ -156,12 +161,23 @@ class SubtitleStore:
 
     def claim_translation(self,session,now):
         with self.lock,self.db:
-            cursor=self.db.execute("SELECT id,subtitle_id,source,model,accepted_mono FROM translation_jobs WHERE session=? AND translation_state='queued' AND display_state!='cancelled' ORDER BY id LIMIT 1",(session,))
+            cursor=self.db.execute("""SELECT id,subtitle_id,source,model,accepted_mono FROM translation_jobs j
+                WHERE session=? AND translation_state='queued' AND display_state!='cancelled'
+                AND NOT EXISTS(SELECT 1 FROM translation_jobs active WHERE active.session=j.session
+                    AND active.subtitle_id=j.subtitle_id AND active.translation_state='translating')
+                ORDER BY id LIMIT 1""",(session,))
             row=cursor.fetchone()
             if row is None:return None
             self.db.execute("UPDATE translation_jobs SET translation_state='translating',api_start_mono=?,updated_utc=? WHERE id=?",(now,time.time(),row[0]))
             self.db.execute("UPDATE subtitles SET status='translating',queue_wait_ms=? WHERE id=?",((now-row[4])*1000,row[1]))
             return dict(zip(('id','subtitle_id','source','model','accepted_mono'),row))
+
+    def context_before(self,job):
+        with self.lock:
+            return [r[0] for r in reversed(self.db.execute("""SELECT source FROM translation_jobs
+                WHERE session=(SELECT session FROM translation_jobs WHERE id=?) AND id<?
+                AND subtitle_id!=(SELECT subtitle_id FROM translation_jobs WHERE id=?)
+                ORDER BY id DESC LIMIT 2""",(job,job,job)).fetchall())]
 
     def complete_translation(self,job,text,now,usage=None,duration=None):
         from subtitle_display import reading_seconds
@@ -171,11 +187,15 @@ class SubtitleStore:
             if row[1] and text.casefold().startswith(row[1].casefold()+':'):text=text[len(row[1])+1:].lstrip()
             duration=reading_seconds(text) if duration is None else duration
             state='cancelled' if row[2]=='cancelled' else 'waiting'
+            newer=self.db.execute('SELECT 1 FROM translation_jobs WHERE subtitle_id=? AND id>? LIMIT 1',(row[0],job)).fetchone()
+            model=self.db.execute('SELECT model FROM translation_jobs WHERE id=?',(job,)).fetchone()[0]
+            if state!='cancelled' and model.startswith('local:') and newer:state='skipped'
             self.db.execute('''UPDATE translation_jobs SET translation_state='completed',display_state=?,translated=?,
                 ready_mono=?,display_queue_mono=?,duration=?,input_tokens=?,output_tokens=?,estimated_usd=?,api_called=?,updated_utc=? WHERE id=?''',
                 (state,text,now,now,duration,getattr(usage,'input_tokens',0),getattr(usage,'output_tokens',0),getattr(usage,'usd',0),int(getattr(usage,'api_called',True)),time.time(),job))
             self.db.execute("UPDATE subtitles SET status='translated',translated=?,translation_ms=?,updated_utc=? WHERE id=?",
                 (text,(now-row[3])*1000 if row[3] is not None else None,time.time(),row[0]))
+            self.condition.notify_all()
 
     def fail_translation(self,job,now,usage=None,cost_unknown=False):
         with self.lock,self.db:
@@ -183,14 +203,30 @@ class SubtitleStore:
             self.db.execute("UPDATE subtitles SET status='translation_error' WHERE id=(SELECT subtitle_id FROM translation_jobs WHERE id=?)",(job,))
             self.db.execute('UPDATE translation_jobs SET input_tokens=?,output_tokens=?,estimated_usd=?,cost_unknown=? WHERE id=?',
                 (getattr(usage,'input_tokens',0),getattr(usage,'output_tokens',0),getattr(usage,'usd',0),int(cost_unknown),job))
+            self.condition.notify_all()
 
-    def offer_next(self,session,now):
+    def offer_next(self,session,now,ready_first=False):
         with self.lock,self.db:
-            row=self.db.execute('''SELECT id,translated,speaker,duration,display_state,ready_mono FROM translation_jobs
-                WHERE session=? AND display_state IN ('not_ready','waiting') ORDER BY id LIMIT 1''',(session,)).fetchone()
+            query="""SELECT id,translated,speaker,duration,display_state,ready_mono FROM translation_jobs
+                WHERE session=? AND display_state IN ('not_ready','waiting') ORDER BY id LIMIT 1"""
+            if ready_first:
+                query="""SELECT id,translated,speaker,duration,display_state,ready_mono FROM translation_jobs
+                    WHERE session=? AND display_state='waiting' AND ready_mono<=?
+                    ORDER BY ready_mono,id LIMIT 1"""
+            row=self.db.execute(query,(session,now) if ready_first else (session,)).fetchone()
             if row is None or row[4]!='waiting' or row[5]>now:return None
             self.db.execute("UPDATE translation_jobs SET display_state='offered',updated_utc=? WHERE id=?",(time.time(),row[0]))
             return dict(id=row[0],text=row[1],speaker=row[2],duration=row[3])
+
+    def ack_observation(self,job,now,renderer):
+        with self.lock,self.db:
+            self.db.execute('''INSERT OR IGNORE INTO render_acks(job_id,renderer,seen_mono)
+                SELECT id,?,? FROM translation_jobs WHERE id=? AND display_state IN ('offered','showing')''',(renderer,now,job))
+
+    def transport_sent(self,ids,transport,now):
+        with self.lock,self.db:
+            self.db.executemany('INSERT OR IGNORE INTO transport_events VALUES (?,?,?)',
+                                [(job,transport,now) for job in ids])
 
     def display_event(self,job,event,now,renderer=None):
         if event not in ('sent','visible','ended'):raise ValueError('Gösterim olayı geçersiz.')
@@ -202,6 +238,7 @@ class SubtitleStore:
                 self.db.execute("UPDATE translation_jobs SET visible_mono=COALESCE(visible_mono,?),renderer=COALESCE(renderer,?),display_state='showing' WHERE id=? AND display_state='offered'",(now,renderer,job))
             else:
                 self.db.execute("UPDATE translation_jobs SET ended_mono=?,display_state='completed' WHERE id=? AND display_state='showing'",(now,job))
+            self.condition.notify_all()
 
     def queue_stats(self,session):
         with self.lock:
@@ -214,6 +251,7 @@ class SubtitleStore:
         with self.lock,self.db:
             self.db.execute("UPDATE translation_jobs SET display_state='cancelled',cancel_reason=?,updated_utc=? WHERE session=? AND display_state NOT IN ('completed','cancelled','skipped')",(reason,time.time(),session))
             self.db.execute("UPDATE translation_jobs SET translation_state='cancelled' WHERE session=? AND translation_state='queued'",(session,))
+            self.condition.notify_all()
 
     def session_metrics(self,session):
         import math,statistics
@@ -235,7 +273,7 @@ class SubtitleStore:
             stages['translation_total_ms']=percentiles([(r[3]-r[2])*1000 for r in records if r[2] is not None and r[3] is not None and r[6]=='completed'])
             measured=[json.loads(r[0]) for r in self.db.execute('''SELECT t.metrics FROM translation_timings t
                 JOIN translation_jobs j ON j.id=t.job_id WHERE j.session=? ORDER BY j.id DESC LIMIT 4096''',(session,))]
-            for stage in ('prepare_ms','request_call_ms','result_ms','engine_init_ms'):
+            for stage in ('prepare_ms','request_call_ms','result_ms','engine_init_ms','processing_ms','roundtrip_ms','capacity_wait_ms'):
                 stages[stage]=percentiles([r[stage] for r in measured if stage in r])
             stages['first_seen_to_renderer_ms']=percentiles([(v-f)*1000 for f,v in self.db.execute('''SELECT s.first_seen_mono,j.visible_mono
                 FROM translation_jobs j JOIN subtitles s ON s.id=j.subtitle_id WHERE j.session=? AND j.visible_mono IS NOT NULL''',(session,))])

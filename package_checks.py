@@ -107,5 +107,17 @@ def run(args):
         root.after(100,poll);root.mainloop()
         report['workers_closed']=all(not worker.is_alive() for worker in window.workers)
         paid.assert_not_called()
+    if getattr(args,'local_model',None):
+        from light_translation import WarmNMTClient
+        client=WarmNMTClient(args.local_python,args.local_model,device=args.local_device,
+            compute_type='int8_float16' if args.local_device=='cuda' else 'int8',
+            workers=1,threads=2,beam_size=4)
+        try:
+            answer=client.translate('You must not open the door.')
+            report['packaged_local_model']=dict(text=answer['text'],complete=answer['complete'],
+                runtime=client.ready['runtime'],roundtrip_ms=answer['roundtrip_ms'])
+            report['ok']=report['ok'] and answer['complete']
+        finally:client.close()
+        report['local_worker_closed']=client.process.poll() is not None
     atomic_json(Path(args.report).resolve(),report)
     print(json.dumps(report,indent=2))

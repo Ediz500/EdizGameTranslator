@@ -1,0 +1,13 @@
+{
+  "game": "Örnek Oyun",
+  "languages": ["en", "tr"],
+  "reviewed": true,
+  "entries": [
+    {
+      "speaker": "Scout",
+      "context": ["Scout: The bridge is clear."],
+      "source": "Go!",
+      "translation": "İlerle!"
+    }
+  ]
+}

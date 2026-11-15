@@ -1,0 +1,4 @@
+# Separate inference environment; no torch/transformers needed after conversion.
+ctranslate2>=4.6,<5
+sentencepiece>=0.2,<1
+psutil>=7,<8
