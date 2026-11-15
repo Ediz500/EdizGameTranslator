@@ -4,6 +4,13 @@ import math
 from types import SimpleNamespace
 from core import clean_ocr, subtitle_observation
 
+# Known short speech is permitted; arbitrary one/two-letter OCR noise is not.
+SHORT_SPEECH = {'go','no','oh','hi','ok','yes','hey','thank you','thanks'}
+
+
+def speech_phrase(text):
+    return re.sub(r'[.!?,…]+$', '', text.strip()).casefold()
+
 
 def dialogue_observation(result,width,height):
     texts=list(getattr(result,'txts',None) or [])
@@ -17,7 +24,8 @@ def dialogue_observation(result,width,height):
             why='hud_distance'
         elif re.fullmatch(r'[A-Z][A-Z _]{2,24}',text):
             why='standalone_ui_label'
-        elif re.fullmatch(r'[A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,2}:?',text):
+        elif (re.fullmatch(r'[A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,2}:?',text)
+              and speech_phrase(text) not in SHORT_SPEECH):
             why='name_without_dialogue'
         box=None
         if boxes is not None and i<len(boxes):
@@ -69,6 +77,12 @@ def dialogue_candidates(result,width,height):
     spatial_only={r['index'] for r in evidence['rejected'] if r['reason']=='separate_text_cluster'}
     allowed.update(i for i in spatial_only if SPEAKER.match(clean_ocr(texts[i])))
     for i in tuple(allowed):
+        _,line_body=split_speaker(clean_ocr(str(texts[i])))
+        if (sum(c.isalpha() for c in line_body)<3 and re.search(r'[.!?]$',line_body)
+                and speech_phrase(line_body) not in SHORT_SPEECH):
+            allowed.remove(i)
+            evidence['rejected'].append(dict(index=i,reason='short_ocr_noise'))
+            continue
         score=float(scores[i]) if i<len(scores) else .7
         if not math.isfinite(score) or not .46<=score<=1:
             allowed.remove(i)
@@ -101,7 +115,11 @@ def dialogue_candidates(result,width,height):
     for group in groups:
         text=clean_ocr(' '.join(group['texts']))
         speaker,body=split_speaker(text)
-        if not body or sum(c.isalpha() for c in body)<3:continue
+        if not body:continue
+        if sum(c.isalpha() for c in body)<3:
+            if speech_phrase(body) not in SHORT_SPEECH:
+                evidence['rejected'].extend(dict(index=i,reason='short_ocr_noise') for i in group['indices'])
+                continue
         b=group['boxes']
         box=(min(x[0] for x in b),max(x[1] for x in b),min(x[2] for x in b),max(x[3] for x in b)) if b else None
         candidates.append(Candidate(text,speaker,body,min(group['scores']),box,tuple(group['indices'])))

@@ -6,7 +6,7 @@ import math
 
 from core import clean_ocr
 
-SPEAKER = re.compile(r"(?<![\w])((?:[A-Z][a-zA-Z'-]*(?:[ -][A-Z][a-zA-Z'-]*){0,2}|[A-Z]{2,6})):\s*")
+SPEAKER = re.compile(r"(?<![\w])((?:(?:Mr|Mrs|Ms|Dr|Prof|Capt|Sgt)\.\s+)?(?:[A-Z][a-zA-Z'-]*(?:[ -][A-Z][a-zA-Z'-]*){0,2}|[A-Z]{2,6})):\s*")
 FUNCTIONS = set("i ill ive i'll i've we you he she it they then this that the a an and but or if so maybe no yes hey what how where when why even good like makes have do get let go its follow stay wait take run stop close keep look please tell".split())
 
 
