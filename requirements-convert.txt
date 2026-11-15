@@ -1,0 +1,7 @@
+# Separate, explicitly installed one-time conversion environment.
+-r requirements-light.txt
+transformers>=4.55,<5
+huggingface-hub>=0.34,<1
+protobuf>=5,<8
+sacremoses>=0.1,<1
+# Install torch from the official PyTorch CPU/CUDA index before conversion.
