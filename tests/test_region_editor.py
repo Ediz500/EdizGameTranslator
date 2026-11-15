@@ -70,7 +70,7 @@ class GeometryTests(unittest.TestCase):
 
 
 class ProfileTests(unittest.TestCase):
-    def test_profiles_roundtrip_separate_games_and_keep_budget(self):
+    def test_profiles_roundtrip_separate_games_without_cloud_fields(self):
         original=dict(DEFAULTS)
         first=with_region(original,'Game A',(.1,.2,.8,.9))
         second=with_region(first,'Game B',(.2,.3,.9,1))
@@ -80,16 +80,16 @@ class ProfileTests(unittest.TestCase):
         self.assertEqual(region_for(loaded,'GAME A'),(.1,.2,.8,.9))
         self.assertEqual(region_for(loaded,'Game B'),(.2,.3,.9,1))
         self.assertEqual(region_for(loaded,'New Game'),DEFAULT_REGION)
-        self.assertEqual(loaded['budget_try'],original['budget_try'])
+        self.assertNotIn('budget_try',loaded)
         self.assertEqual(loaded['game'],'Game B')
 
-    def test_legacy_settings_and_corrupt_profiles_preserve_budget(self):
+    def test_legacy_settings_and_corrupt_profiles_ignore_cloud_fields(self):
         s=dict(DEFAULTS);s.update(game='Legacy',crop_top=50,crop_bottom=90)
         self.assertEqual(region_for(s,'Legacy'),(0,.5,1,.9))
         with tempfile.TemporaryDirectory() as folder,patch('core.config_folder',return_value=Path(folder)):
             (Path(folder)/'settings.json').write_text('{"budget_try": 123, "ocr_regions": []}')
             loaded=load_settings()
-        self.assertEqual(loaded['budget_try'],123)
+        self.assertNotIn('budget_try',loaded)
         self.assertEqual(loaded['ocr_regions'],{})
 
     def test_no_hidden_credentials_and_failed_save_keeps_file(self):
@@ -206,7 +206,7 @@ class ControllerTests(unittest.TestCase):
             self.stack.enter_context(patch(target,return_value=Path(self.folder)))
         self.stack.enter_context(patch('app.secret_get',return_value=''))
         self.stack.enter_context(patch('app.secret_save'))
-        self.api=self.stack.enter_context(patch('app.TranslationEngine'))
+        self.api=self.stack.enter_context(patch('app.WarmNMTClient'))
         self.obs=MagicMock();self.obs.frame.return_value=Image.new('RGB',(960,540),'#283038')
         def read():
             time.sleep(.015)

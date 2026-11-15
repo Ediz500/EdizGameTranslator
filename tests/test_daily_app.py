@@ -31,7 +31,7 @@ class TransitionTests(unittest.TestCase):
             (Path(folder)/'settings.json').write_text(json.dumps(old))
             loaded=load_settings()
         self.assertEqual(loaded['capture_method'],'virtual_camera')
-        for key in ('game','crop_top','budget_try','estimated_total_usd','token_total_in','lore'):
+        for key in ('game','crop_top','lore'):
             self.assertEqual(loaded[key],old[key])
 
     def test_rename_preserves_region_and_rejects_collision(self):
@@ -93,45 +93,10 @@ class TransitionTests(unittest.TestCase):
             (d/'copy.json').write_text('{"name":"Active"}')
             with self.assertRaises(ValueError):camera.resolve_collection_path(obs)
 
-    def test_installed_openai_sdk_serializes_sol_contract_without_network(self):
-        import httpx2 as httpx
-        import openai
-        from core import TranslationEngine,BudgetLedger,ContextMemory
-        requests=[];original=openai.OpenAI
-        def reply(request):
-            requests.append(json.loads(request.content))
-            return httpx.Response(200,json=dict(id='resp_offline',object='response',created_at=0,
-                status='completed',model='gpt-6.1-sol',output=[dict(type='message',id='msg_local',role='assistant',
-                status='completed',content=[dict(type='output_text',text='Beni takip et!',annotations=[])])],
-                usage=dict(input_tokens=100,output_tokens=10,total_tokens=110)))
-        client=httpx.Client(transport=httpx.MockTransport(reply))
-        with patch('openai.OpenAI',side_effect=lambda **kw:original(**kw,http_client=client)):
-            ledger=BudgetLedger(0,1,10)
-            engine=TranslationEngine('offline-test-key','gpt-6.1-sol',ContextMemory('Test',''),ledger)
-            try:translated,usage=engine.translate('Follow me!')
-            finally:engine.client.close()
-        self.assertEqual(translated,'Beni takip et!')
-        self.assertEqual(len(requests),1)
-        req=requests[0]
-        self.assertEqual((req['model'],req['reasoning'],req['store'],req['service_tier']),
-                         ('gpt-6.1-sol',{'effort':'low'},False,'default'))
-        self.assertEqual(req['max_output_tokens'],250)
-        self.assertFalse(ledger.blocked)
-
-    def test_incomplete_response_charged_but_not_used_as_subtitle(self):
-        from core import TranslationEngine,BudgetLedger,ContextMemory
-        sdk=MagicMock();sdk.OpenAI.return_value.responses.create.return_value=SimpleNamespace(
-            status='incomplete',output_text='Half',usage=SimpleNamespace(input_tokens=100,output_tokens=250))
-        ledger=BudgetLedger(0,1,10)
-        with patch.dict(sys.modules,{'openai':sdk}):
-            engine=TranslationEngine('offline','gpt-6.1-sol',ContextMemory('Test',''),ledger)
-            with self.assertRaises(RuntimeError):engine.translate('Follow me!')
-        self.assertGreater(ledger.usd,0);self.assertFalse(ledger.pending)
-
 
 @unittest.skipUnless(sys.platform=='win32','Windows Tk only')
 class DailyGuiTests(unittest.TestCase):
-    """Real controller, tracking, SQLite, budget, HTTP and Tk. Mock I/O only."""
+    """Real controller, tracking, SQLite, local engine, HTTP and Tk. Mock I/O only."""
     def setUp(self):
         import app,tkinter as tk,numpy as np
         self.app=app;self.stack=ExitStack()
@@ -157,10 +122,8 @@ class DailyGuiTests(unittest.TestCase):
         self.device=self.stack.enter_context(patch('cv2.VideoCapture',return_value=self.cap))
         self.ocr=self.stack.enter_context(patch('app.create_ocr')).return_value
         self.ocr.return_value=SimpleNamespace(txts=['Follow me!'],scores=[.99],boxes=None)
-        self.sdk=MagicMock()
-        self.sdk.OpenAI.return_value.responses.create.return_value=SimpleNamespace(
-            status='completed',output_text='Beni takip et!',usage=SimpleNamespace(input_tokens=100,output_tokens=10))
-        self.stack.enter_context(patch.dict(sys.modules,{'openai':self.sdk}))
+        from cloud_guard import NoCloudImports
+        self.cloud_guard=self.stack.enter_context(NoCloudImports())
         self.local=MagicMock();self.local.closed=False
         self.local.translate.return_value=dict(text='Beni takip et!',complete=True,processing_ms=1)
         self.local_factory=self.stack.enter_context(patch('app.WarmNMTClient',return_value=self.local))
@@ -169,7 +132,7 @@ class DailyGuiTests(unittest.TestCase):
         config={'name':'Test','virtual-camera':{'type2':2,'source':'Raw'},
                 'sources':[{'name':'Raw','id':'dshow_input','settings':{'video_device_id':'raw-card'},'filters':[]}]}
         self.config=self.folder/'collection.json';self.config.write_text(json.dumps(config))
-        self.w.camera_config.set(str(self.config));self.w.source.set('Raw');self.w.api_key.set('offline-test-key')
+        self.w.camera_config.set(str(self.config));self.w.source.set('Raw')
         self.w.show_desktop.set(False);self.root.update()
 
     def tearDown(self):
@@ -181,23 +144,22 @@ class DailyGuiTests(unittest.TestCase):
             self.root.update();time.sleep(.01)
         self.assertTrue(predicate())
 
-    def test_live_virtual_camera_to_fake_api_and_real_http_overlay(self):
+    def test_live_virtual_camera_to_local_engine_and_real_http_overlay(self):
         self.w.start()
         self.wait(lambda:self.w.overlay_state.current()=='Beni takip et!')
         self.assertTrue(self.w.running);self.assertEqual(self.w.start_btn['text'],'■  DURDUR')
         with urlopen('http://127.0.0.1:8788/state',timeout=2) as r:
             self.assertEqual(json.load(r)['text'],'Beni takip et!')
         self.assertEqual(self.local.translate.call_count,1)
-        self.sdk.OpenAI.assert_not_called()
+        self.assertEqual(self.cloud_guard.attempts,[])
         self.device.assert_called_once();self.obs.frame.assert_not_called()
-        self.assertEqual(self.w.ledger.usd,0);self.assertFalse(self.w.ledger.pending)
         with closing(sqlite3.connect(self.folder/'subtitles.sqlite3')) as db:
             self.assertEqual(db.execute('SELECT status,translated FROM subtitles').fetchall(),[('translated','Beni takip et!')])
 
-    def test_no_api_client_if_route_cannot_be_verified(self):
+    def test_no_local_engine_if_route_cannot_be_verified(self):
         self.route.check.side_effect=camera.CaptureConfigurationError('Unsafe route')
         self.w.start();self.wait(lambda:not self.w.running)
-        self.sdk.OpenAI.assert_not_called();self.device.assert_not_called()
+        self.assertEqual(self.cloud_guard.attempts,[]);self.device.assert_not_called()
         self.assertEqual(self.w.overlay_state.current(),'')
 
     def test_simultaneous_speakers_have_separate_requests(self):
@@ -207,11 +169,11 @@ class DailyGuiTests(unittest.TestCase):
         self.wait(lambda:requests.call_count==2)
         for call in requests.call_args_list:
             self.assertIn(call.args[0],('Stay close.','I see them.'))
-        self.sdk.OpenAI.assert_not_called()
+        self.assertEqual(self.cloud_guard.attempts,[])
         with closing(sqlite3.connect(self.folder/'subtitles.sqlite3')) as db:
             self.assertEqual(db.execute('SELECT COUNT(*) FROM subtitles').fetchone()[0],2)
 
-    def test_route_failure_during_slow_api_clears_overlay_and_hides_result(self):
+    def test_route_failure_during_slow_translation_clears_overlay_and_hides_result(self):
         entered=threading.Event();release=threading.Event()
         def slow(source):
             entered.set();release.wait(3)
@@ -228,10 +190,10 @@ class DailyGuiTests(unittest.TestCase):
         with closing(sqlite3.connect(self.folder/'subtitles.sqlite3')) as db:
             self.assertEqual(db.execute('SELECT translation_state,display_state,cancel_reason FROM translation_jobs').fetchone(),('completed','cancelled','source_lost'))
 
-    def test_diagnostic_mode_never_constructs_api(self):
+    def test_diagnostic_mode_never_constructs_cloud_sdk(self):
         self.w.diagnostic_mode.set(True);self.w.start()
         self.wait(lambda:self.ocr.call_count>=2)
-        self.sdk.OpenAI.assert_not_called()
+        self.assertEqual(self.cloud_guard.attempts,[])
         self.assertEqual(self.w.overlay_state.current(),'')
 
     def test_two_pages_and_game_rename_save_restore_without_secret_writes(self):
@@ -272,7 +234,7 @@ class DailyGuiTests(unittest.TestCase):
         self.w.overlay_state.ack([state['blocks'][0]['id']],state['generation'])
         self.assertIsNotNone(self.w.overlay_state.snapshot()['blocks'][0]['started'])
 
-    def test_legacy_cloud_preference_is_preserved_without_affecting_local_engine(self):
+    def test_legacy_cloud_preference_is_ignored_without_affecting_local_engine(self):
         entered=threading.Event();release=threading.Event()
         def slow(source):
             entered.set();release.wait(3)
@@ -280,20 +242,19 @@ class DailyGuiTests(unittest.TestCase):
         self.local.translate.side_effect=slow
         self.w.start();self.wait(entered.is_set)
         try:
-            self.w.model.set('gpt-6.1-terra');self.w.save_preferences()
+            self.w.settings['model']='obsolete-preference';self.w.save_preferences()
             self.ocr.return_value=SimpleNamespace(txts=['Head towards the bridge!'],scores=[.99],boxes=None)
         finally:release.set()
         self.wait(lambda:self.local.translate.call_count>=2)
-        self.local_factory.assert_called_once();self.sdk.OpenAI.assert_not_called()
-        self.assertEqual(self.w.settings['model'],'gpt-6.1-terra')
+        self.local_factory.assert_called_once();self.assertEqual(self.cloud_guard.attempts,[])
+        self.assertNotIn('model',load_settings())
 
-    def test_historical_locked_cloud_budget_does_not_block_local_translation(self):
-        self.w.ledger.blocked=True
+    def test_no_budget_component_is_needed_for_local_translation(self):
+        self.assertFalse(hasattr(self.w,'ledger'))
         self.w.start()
         self.wait(lambda:self.w.overlay_state.current()=='Beni takip et!')
         self.assertTrue(self.w.running)
-        self.assertTrue(self.w.ledger.blocked);self.assertEqual(self.w.ledger.usd,0)
-        self.sdk.OpenAI.assert_not_called()
+        self.assertEqual(self.cloud_guard.attempts,[])
 
     def test_ready_result_in_same_session_is_not_expired_by_ocr_generation(self):
         self.w.running=True;self.w.latest_seq=4;self.w.session_id=2
@@ -313,7 +274,6 @@ class DailyGuiTests(unittest.TestCase):
             with closing(sqlite3.connect(self.folder/'subtitles.sqlite3')) as db:
                 return db.execute('SELECT status FROM subtitles').fetchone()[0]=='translated'
         self.wait(saved)
-        self.assertFalse(self.w.ledger.pending)
         self.w.latest_seq+=1
         self.w.post_session(self.w.session_id,'clear',self.w.latest_seq)
         self.root.update()

@@ -33,7 +33,8 @@ def run(args):
         for target in ('app.config_folder','core.config_folder'):stack.enter_context(patch(target,return_value=Path(folder)))
         stack.enter_context(patch('app.secret_get',return_value=''))
         stack.enter_context(patch('app.secret_save'))
-        paid=stack.enter_context(patch('openai.OpenAI',side_effect=AssertionError('Paid API prohibited')))
+        from cloud_guard import NoCloudImports
+        cloud=stack.enter_context(NoCloudImports())
         stack.enter_context(patch.object(app.MainWindow,'_make_capture_source',return_value=Camera()))
         stack.enter_context(patch('app.launch_server',side_effect=lambda state:launch_server(state,0)))
         errors=[]
@@ -46,19 +47,19 @@ def run(args):
             store=window.subtitle_store
             if store:
                 with store.lock:
-                    cursor=store.db.execute('SELECT source,translated,translation_state,api_called FROM translation_jobs')
+                    cursor=store.db.execute('SELECT source,translated,translation_state FROM translation_jobs')
                     names=[c[0] for c in cursor.description]
                     rows=[dict(zip(names,r)) for r in cursor.fetchall()]
             else:rows=[]
             done=[r for r in rows if r['translation_state']=='completed']
             if done or time.monotonic()>deadline or errors:
-                report.update(ok=bool(done) and not errors,rows=done,errors=errors,paid_api_calls=paid.call_count,
+                report.update(ok=bool(done) and not errors,rows=done,errors=errors,cloud_import_attempts=cloud.attempts,
                     local_engine=window.local_coordinator.summary() if window.local_coordinator else None)
                 window.close();return
             root.after(20,poll)
         root.after(20,poll);root.mainloop()
     Path(args.output).write_text(json.dumps(report,ensure_ascii=False,indent=2),encoding='utf-8')
-    return 0 if report['ok'] and report['paid_api_calls']==0 else 1
+    return 0 if report['ok'] and not report['cloud_import_attempts'] else 1
 
 
 if __name__=='__main__':

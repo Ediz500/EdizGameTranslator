@@ -1,4 +1,4 @@
-"""Ediz Game Translator v0.1 (Windows) — OBS source -> OCR -> AI -> OBS + monitor."""
+"""Ediz Game Translator v0.1 (Windows) — OBS source -> OCR -> local translation -> OBS + monitor."""
 from __future__ import annotations
 
 import queue
@@ -12,9 +12,7 @@ from datetime import datetime
 from pathlib import Path
 from tkinter import filedialog, messagebox, simpledialog, ttk
 
-from core import (BudgetLedger, ContextMemory, PRICE_PER_MILLION, SubtitleTimeline,
-                  TranslationEngine,
-                  load_settings, save_settings, config_folder)
+from core import SubtitleTimeline, load_settings, save_settings, config_folder
 from desktop_overlay import DesktopOverlay, monitors
 from obs_capture import ObsSource, crop_frame
 from capture_pipeline import CaptureRunner, DiagnosticLog
@@ -37,6 +35,8 @@ SERVICE = "EdizGameTranslator-V01"
 
 
 def secret_get(name: str) -> str:
+    if name != 'obs_password':
+        raise ValueError('Yalnız OBS parolası kullanılabilir.')
     try:
         import keyring
         return keyring.get_password(SERVICE, name) or ""
@@ -45,6 +45,8 @@ def secret_get(name: str) -> str:
 
 
 def secret_save(name: str, value: str) -> None:
+    if name != 'obs_password':
+        raise ValueError('Yalnız OBS parolası kullanılabilir.')
     import keyring
     if value:
         keyring.set_password(SERVICE, name, value)
@@ -62,11 +64,6 @@ class MainWindow:
         root.geometry("875x930")
         root.minsize(790, 700)
         self.settings = load_settings()
-        self.ledger = BudgetLedger(self.settings["estimated_total_usd"],
-                                   self.settings["usd_try"], self.settings["budget_try"],
-                                   path=config_folder() / "ledger.json",
-                                   initial_in=self.settings['token_total_in'],
-                                   initial_out=self.settings['token_total_out'])
         self.overlay_state = SharedOverlayState()
         self.overlay_state.transport=self.settings.get('display_transport','poll')
         self.overlay = DesktopOverlay(root)
@@ -91,7 +88,6 @@ class MainWindow:
         self.preview_stop = None
         self.preview_active = False
         self.preview_status = 'Kaynak hazırlanıyor…'
-        self.session_initial_usd = self.ledger.usd
         self.shown_ids=set()
         self.close_after=None
         self.metrics_saved_session=None
@@ -122,19 +118,9 @@ class MainWindow:
         webbrowser.open(OBS_OVERLAY_URL)
 
     def save_preferences(self):
-        if self.prepare(require_source=False,require_key=False):
+        if self.prepare(require_source=False):
             self.status_var.set('Ayarlar kaydedildi. Görüntü ayarları sonraki başlangıçta uygulanır.')
 
-    def forget_api_key(self):
-        if self.running or any(w.is_alive() for w in self.workers):
-            messagebox.showinfo('API anahtarı','Anahtarı silmeden önce oturumu durdurun ve işlemlerin bitmesini bekleyin.')
-            return
-        try:
-            secret_save('openai_api_key','')
-            self.api_key.set('')
-            self.status_var.set('API anahtarı Windows kasasından silindi.')
-        except Exception:
-            messagebox.showerror('API anahtarı','Windows anahtar kasası güncellenemedi. Tekrar deneyin.')
 
     def _change_game(self,new_name,rename=False):
         if self.running or self.region_editor is not None or any(w.is_alive() for w in self.workers):
@@ -304,10 +290,8 @@ class MainWindow:
         s = dict(self.settings)
         s.update(obs_port=int(self.obs_port.get().strip()),
                  obs_source=self.source.get().strip(),
-                 model=self.model.get(), game=self.game.get().strip() or "Genel oyun",
+                 game=self.game.get().strip() or "Genel oyun",
                  lore=self.lore_text.get("1.0", "end").strip(),
-                 budget_try=float(self.budget.get().replace(",", ".")),
-                 usd_try=float(self.usd_try.get().replace(",", ".")),
                  scan_interval=float(self.interval.get().replace(",", ".")),
                  monitor_index=max(self.monitor_combo.current(), 0),
                  show_desktop=bool(self.show_desktop.get()),
@@ -334,28 +318,20 @@ class MainWindow:
             raise ValueError("Yazı boyu 12–96, alttan mesafe %1–40 olmalı.")
         from PIL import Image
         crop_frame(Image.new("RGB", (200, 200)), s["crop_left"], s["crop_top"], s["crop_right"], s["crop_bottom"])
-        if s["budget_try"] <= 0 or s["usd_try"] <= 0:
-            raise ValueError("Bütçe limiti ve USD/TRY değeri pozitif olmalı.")
         return s
 
-    def prepare(self, require_source=True, require_key=False):
+    def prepare(self, require_source=True):
         if self.closing:
             return None
         try:
             s = self._settings_from_ui()
             if require_source and not s["obs_source"]:
                 raise ValueError("Önce OBS oyun kaynağını seç.")
-            if require_key and not self.api_key.get().strip():
-                raise ValueError("OpenAI API anahtarını gir.")
             secret_save("obs_password", self.obs_password.get())
-            # Cloud settings/credential/ledger remain historical data. The local
-            # path never writes an API credential, reserves money or calls SDKs.
-            s['estimated_total_usd']=self.ledger.usd
             save_settings(s)
             self.settings = dict(s)
             # Runtime-only credentials; save_settings has a strict allowlist.
             s["obs_password_runtime"] = self.obs_password.get()
-            s["api_key_runtime"] = self.api_key.get().strip()
             self.overlay_state.font = s["font_size"]
             self.overlay_state.bottom = s["overlay_bottom"]
             return s
@@ -367,7 +343,7 @@ class MainWindow:
         return ObsSource(s["obs_password_runtime"], s["obs_port"], width=s.get("capture_width",960))
 
     def load_sources(self):
-        s = self.prepare(require_source=False, require_key=False)
+        s = self.prepare(require_source=False)
         if s is None:
             return
         self.status_var.set("OBS kaynakları okunuyor...")
@@ -395,52 +371,18 @@ class MainWindow:
         if getattr(self,'preview_active',False) or self.running:
             self.status_var.set('Tanılama sürerken örnek altyazı üretimi kapalı (OCR döngü koruması).')
             return
-        s = self.prepare(require_source=False, require_key=False)
+        s = self.prepare(require_source=False)
         if not s:
             return
         self._place_overlay(s)
         self.overlay_state.set("Burada ne olduğunu öğrenmeliyiz.", 12)
         self.log("Demo altyazısı 12 saniye boyunca PC/OBS üzerinde gösteriliyor. API harcaması yok.")
 
-    def legacy_test_ai(self):
-        if getattr(self,'running',False) or getattr(self,'preview_active',False) or self.diagnostic_active or self.diagnostic_mode.get():
-            self.status_var.set('OCR tanılamasında OpenAI çağrıları kapalı.')
-            return
-        s = self.prepare(require_source=False, require_key=True)
-        if s is None:
-            return
-        source = simpledialog.askstring("Çeviri kalitesini test et",
-                   "Bir İngilizce oyun repliği gir:",
-                   initialvalue="I've got your back. We should leave before the guards return.", parent=self.root)
-        if not source or not source.strip():
-            return
-        try:
-            self._place_overlay(s)
-        except Exception as exc:
-            messagebox.showerror("Ekran", str(exc))
-            return
-        session_id = self.session_id
-        self.status_var.set("AI örnek çeviriyi hazırlıyor...")
-        def go():
-            engine = None
-            try:
-                memory = ContextMemory(s["game"], s["lore"])
-                engine = TranslationEngine(s["api_key_runtime"], s["model"], memory, self.ledger)
-                began = time.monotonic()
-                translated, usage = engine.translate(source.strip())
-                self.post_session(session_id, "ai_demo", translated, source.strip(), time.monotonic()-began, usage.usd)
-                self.post("spent", )
-            except Exception as exc:
-                self.post_session(session_id, "error", "AI test: " + type(exc).__name__)
-            finally:
-                if engine is not None:
-                    engine.client.close()
-        self._spawn(go)
 
     def test_ai(self):
         if getattr(self,'running',False) or getattr(self,'preview_active',False) or self.diagnostic_active or self.diagnostic_mode.get():
             self.status_var.set('Yerel testi başlatmadan önce yakalamayı durdurun.');return
-        s=self.prepare(require_source=False,require_key=False)
+        s=self.prepare(require_source=False)
         if s is None:return
         try:model_manifest(s['local_model_path'],verify=False)
         except Exception as exc:messagebox.showerror('Yerel model',str(exc));return
@@ -454,7 +396,7 @@ class MainWindow:
                     compute_type=s['local_compute_type'],workers=s['local_workers'],threads=s['local_threads'],
                     beam_size=s.get('local_beam_size',4))
                 began=time.monotonic();r=engine.translate(source.strip())
-                self.post_session(session_id,'ai_demo',r['text'],source.strip(),time.monotonic()-began,0)
+                self.post_session(session_id,'local_demo',r['text'],source.strip(),time.monotonic()-began)
             except Exception as exc:self.post_session(session_id,'error',str(exc))
             finally:
                 if engine:engine.close()
@@ -479,7 +421,7 @@ class MainWindow:
             self.status_var.set("Önceki işlemlerin tamamlanması bekleniyor.")
             return
         diagnostic = bool(self.diagnostic_mode.get())
-        s = self.prepare(require_key=False)
+        s = self.prepare()
         if s is None:
             return
         if not self.server:
@@ -497,7 +439,7 @@ class MainWindow:
             return
         detailed = bool(self.diagnostic_logs.get())
         if detailed and not diagnostic:
-            messagebox.showwarning('Tanılama', "Ayrıntılı günlük için API'siz OCR tanılamasını seç.")
+            messagebox.showwarning('Tanılama', "Ayrıntılı günlük için Yalnız OCR tanılamasını seç.")
             return
         if detailed and not messagebox.askyesno('Hassas günlük',
                 'Ham OCR metni ve süreler yerel JSONL dosyasına yazılacak. Özel metin içerebilir. Devam edilsin mi?'):
@@ -522,27 +464,23 @@ class MainWindow:
         self.stop_evt = threading.Event()
         self.session_id += 1
         session_id = self.session_id
-        jobs = None  # Translation backlog is durable SQLite, not a lossy RAM queue.
         self.overlay_state.bind(self.subtitle_store,s['_capture_session'],ready_first=True)
         self.shown_ids=set()
         self.metrics_saved_session=None
-        memory = ContextMemory(s["game"], s["lore"])
         self.latest_seq = self.seq = 0
         self.timeline = SubtitleTimeline()
         self.start_at = time.monotonic()
-        self.session_initial_usd = self.ledger.usd
-        self.memory = memory
         self.start_btn.configure(text='■  DURDUR',state='normal')
         self.game_combo.configure(state='disabled')
-        self.connection_var.set('OBS: Denetleniyor     Kamera: Açılıyor     AI: '+('Kapalı' if diagnostic else 'Bekliyor'))
+        self.connection_var.set('OBS: Denetleniyor     Kamera: Açılıyor     Yerel: '+('Kapalı' if diagnostic else 'Bekliyor'))
         self.status_var.set("Başlatılıyor: OBS bağlantısı ve OCR hazırlanıyor...")
         self.log(f"Çeviri başlıyor: {s['game']} · yerel {s['translation_engine']} · kaynak: {s['obs_source']}")
         s['_ready']=threading.Event()
         self.active_capture_settings=s
-        if not diagnostic:self._spawn(self.translate_worker, s, self.stop_evt, session_id, jobs, memory)
-        self._spawn(self.capture_worker, s, self.stop_evt, session_id, jobs)
+        if not diagnostic:self._spawn(self.translate_worker, s, self.stop_evt, session_id)
+        self._spawn(self.capture_worker, s, self.stop_evt, session_id)
 
-    def capture_worker(self, s, stop_flag, session_id, jobs):
+    def capture_worker(self, s, stop_flag, session_id, jobs=None):
         buffered = None
         ocr = None
         diagnostic = None
@@ -585,10 +523,10 @@ class MainWindow:
                 s.get('fixed_ocr_interval',.04),
                 ImageChangeGate(s.get('change_check_interval',.02),s.get('full_ocr_interval',.15))
                     if s.get('capture_schedule')=='adaptive' else None)
-            # Do not create an API client until a safe raw camera frame exists.
+            # Start the local translator only after a safe raw camera frame exists.
             s['_ready'].set()
-            self.post_session(session_id,'connections','OBS: Güvenli     Kamera: Bağlı     AI: '+('Kapalı · tanılama' if s['_diagnostic'] else 'Hazır · ilk istek bekleniyor'))
-            self.post_session(session_id, 'status', 'OCR hazır · ' + ('API KAPALI' if s['_diagnostic'] else 'çeviri açık'))
+            self.post_session(session_id,'connections','OBS: Güvenli     Kamera: Bağlı     Yerel: '+('Kapalı · tanılama' if s['_diagnostic'] else 'Hazır · ilk istek bekleniyor'))
+            self.post_session(session_id, 'status', 'OCR hazır · ' + ('yalnız OCR' if s['_diagnostic'] else 'çeviri açık'))
             runner.run(stop_flag)
         except Exception as exc:
             if stop_flag.is_set():return
@@ -623,54 +561,8 @@ class MainWindow:
             self.post_session(session_id,'error',detail)
             self.post_session(session_id,'stopped',detail)
 
-    def legacy_translate_worker(self, s, stop_flag, session_id, jobs, memory):
-        if s.get('_diagnostic'):return
-        engine=None
-        try:
-            ready=s.get('_ready')
-            if ready is not None:
-                while not ready.wait(.05):
-                    if stop_flag.is_set():return
-            if stop_flag.is_set():return
-            engine_started=time.monotonic()
-            engine=TranslationEngine(s['api_key_runtime'],s['model'],memory,self.ledger)
-            engine_init_ms=(time.monotonic()-engine_started)*1000
-            store=s['_store']
-            while not stop_flag.is_set():
-                job=store.claim_translation(s['_capture_session'],time.monotonic())
-                if job is None:
-                    stop_flag.wait(.05);continue
-                if stop_flag.is_set():break
-                try:
-                    if job['model']!=s['model']:raise ValueError('Oturum modeli değişti.')
-                    began=time.monotonic()
-                    text,usage=engine.translate(job['source'])
-                    ended=time.monotonic()
-                    store.complete_translation(job['id'],text,ended,usage)
-                    timings=dict(getattr(engine,'last_timing',{}))
-                    if engine_init_ms is not None:
-                        timings['engine_init_ms']=engine_init_ms;engine_init_ms=None
-                    store.record_timing(job['id'],timings)
-                    if not stop_flag.is_set() and session_id==self.session_id:
-                        memory.remember(s['model'],job['source'],text)
-                        self.post_session(session_id,'translated',job['id'],text,job['source'],ended-began,usage.usd)
-                    self.post('spent')
-                except Exception as exc:
-                    store.record_timing(job['id'],getattr(engine,'last_timing',{}))
-                    store.fail_translation(job['id'],time.monotonic(),getattr(exc,'usage',None),getattr(exc,'cost_unknown',False))
-                    self.post_session(session_id,'error','Çeviri alınamadı. Model erişimini, anahtarı ve bütçeyi kontrol edin. ('+type(exc).__name__+')')
-                    if self.ledger.blocked or not self.ledger.can_spend():
-                        stop_flag.set();self.overlay_state.clear('budget_or_unknown_cost')
-                        self.post_session(session_id,'stopped','API bütçesi veya belirsiz maliyet nedeniyle durduruldu.');break
-        except Exception as exc:
-            self.post_session(session_id,'error','AI motoru başlatılamadı: '+type(exc).__name__)
-            stop_flag.set();self.overlay_state.clear('ai_start_error')
-            self.post_session(session_id,'stopped')
-        finally:
-            if '_store' in s and stop_flag.is_set():s['_store'].cancel_session(s['_capture_session'],'session_end')
-            if engine is not None:engine.client.close()
 
-    def translate_worker(self,s,stop_flag,session_id,jobs,memory):
+    def translate_worker(self,s,stop_flag,session_id):
         if s.get('_diagnostic'):return
         try:
             ready=s.get('_ready')
@@ -680,7 +572,7 @@ class MainWindow:
             if stop_flag.is_set():return
             def result(job,text,elapsed,route):
                 if session_id==self.session_id and not stop_flag.is_set():
-                    self.post_session(session_id,'translated',job['id'],text,job['source'],elapsed,0)
+                    self.post_session(session_id,'translated',job['id'],text,job['source'],elapsed)
             self.local_coordinator=LocalTranslationCoordinator(s,s['_store'],s['_capture_session'],stop_flag,
                 result,lambda message:self.post_session(session_id,'error','Yerel motor: '+message),
                 engine_factory=WarmNMTClient)
@@ -702,20 +594,13 @@ class MainWindow:
         self.running = False
         self.start_btn.configure(text='▶  ÇEVİRİYİ BAŞLAT',state='normal')
         self.game_combo.configure(state='readonly')
-        self.connection_var.set('OBS: Bekliyor     Kamera: Durduruluyor     AI: Kapalı')
+        self.connection_var.set('OBS: Bekliyor     Kamera: Durduruluyor     Yerel: Kapalı')
         self.status_var.set("Durduruldu. Yeni bir oturum başlatabilirsiniz.")
         self.overlay_state.clear()
         if hasattr(self,'last_translation_var'):self.last_translation_var.set('Türkçe çeviri burada görünecek.')
         self.overlay.hide()
-        self._store_ledger()
         self.log("Çeviri durduruldu.")
 
-    def _store_ledger(self):
-        snapshot = self.ledger.snapshot()
-        self.settings['estimated_total_usd'] = snapshot['usd']
-        self.settings['token_total_in'] = snapshot['input_tokens']
-        self.settings['token_total_out'] = snapshot['output_tokens']
-        save_settings(self.settings)
 
     def _save_session_metrics(self):
         active=getattr(self,'active_capture_settings',None)
@@ -768,8 +653,8 @@ class MainWindow:
                     self.status_var.set(f"{len(args[0])} kaynak bulundu.")
                 elif kind == "source":
                     # Raw OCR is opt-in in diagnostic files, not in the default UI log.
-                    self.status_var.set('Replik yerel kayda alındı · API KAPALI' if self.diagnostic_active
-                                        else 'Replik kaydedildi · AI çevirisi yapılıyor...')
+                    self.status_var.set('Replik yerel kayda alındı · yalnız OCR' if self.diagnostic_active
+                                        else 'Replik kaydedildi · Yerel çeviri yapılıyor...')
                     self.last_source_var.set(args[0])
                 elif kind == 'connections':
                     self.connection_var.set(args[0])
@@ -779,19 +664,19 @@ class MainWindow:
                     self.log(f"OCR özeti: {summary['frames']} kare, {summary['accepted']} kabul; "
                              f"OCR p50/p95 {ocr.get('p50', 0):.1f}/{ocr.get('p95', 0):.1f} ms; "
                              f"CPU (tek çekirdek ölçeği) %{summary['cpu_one_core_percent']:.1f}")
-                elif kind == "ai_demo":
-                    translated, source, elapsed, cost = args
+                elif kind == "local_demo":
+                    translated, source, elapsed = args
                     self.overlay_state.set(translated, 12)
-                    self.log(f"AI TEST EN: {source}")
-                    self.log(f"AI TEST TR ({elapsed:.2f} sn, ${cost:.5f}): {translated}")
-                    self.status_var.set(f"AI test tamamlandı · {elapsed:.2f} saniye")
+                    self.log(f"Yerel TEST EN: {source}")
+                    self.log(f"Yerel TEST TR ({elapsed*1000:.0f} ms): {translated}")
+                    self.status_var.set(f"Yerel test tamamlandı · {elapsed:.2f} saniye")
                 elif kind == "translated":
-                    translated, source, elapsed, cost,*_ = args
+                    translated, source, elapsed,*_ = args
                     if hasattr(self,'last_translation_var'):
                         self.last_translation_var.set(translated)
-                        self.connection_var.set('OBS: Güvenli     Kamera: Bağlı     AI: Yanıt alındı')
-                    self.log(f"TR ({elapsed:.2f} sn, ${cost:.5f}): {translated}")
-                    self.status_var.set(f"Aktif · son AI yanıtı {elapsed:.2f} saniye")
+                        self.connection_var.set('OBS: Güvenli     Kamera: Bağlı     Yerel: Yanıt alındı')
+                    self.log(f"TR ({elapsed*1000:.0f} ms): {translated}")
+                    self.status_var.set(f"Aktif · son çeviri {elapsed:.2f} saniye")
                 elif kind == "status":
                     self.status_var.set(args[0])
                 elif kind == "error":
@@ -800,18 +685,16 @@ class MainWindow:
                 elif kind == "stopped":
                     self.stop()
                     if args:self.status_var.set('Güvenlik için durduruldu. '+args[0])
-                elif kind == "spent":
-                    self._store_ledger()
         except queue.Empty:
             pass
-        prefix = "Geçmiş maliyet mutabakatı bekliyor. " if self.ledger.blocked else ""
-        self.cost_var.set(prefix + f"Geçmiş bulut harcaması ≈ {self.ledger.spent_try():.2f} TL."
-                          " Yerel çeviri bu bütçeyi kullanmaz.")
-        if hasattr(self,'session_cost_var'):
-            self.session_cost_var.set("Yerel çeviri · ücretli API kapalı")
-            if not self.running and not self.preview_active and not any(w.is_alive() for w in self.workers):
-                self.connection_var.set('OBS: Bekliyor     Kamera: Kapalı     AI: Kapalı')
-                self._save_session_metrics()
+        engine=getattr(getattr(self,'local_coordinator',None),'engine',None)
+        warm=engine is not None and not getattr(engine,'closed',True)
+        self.engine_info_var.set(f"Motor: {self.local_engine.get()} · {self.local_device.get().upper()} · "+
+                                 ('Model sıcak' if warm else 'Model yüklenmedi'))
+        self.session_info_var.set('Yerel çeviri')
+        if not self.running and not self.preview_active and not any(w.is_alive() for w in self.workers):
+            self.connection_var.set('OBS: Bekliyor     Kamera: Kapalı     Yerel: Kapalı')
+            self._save_session_metrics()
         state=self.overlay_state.snapshot()
         blocks=state['blocks']
         self.overlay.render_blocks(blocks)
@@ -822,9 +705,9 @@ class MainWindow:
                 if b['started'] is not None and b['id'] not in self.shown_ids:
                     self.timeline.add(max(0,b['started']-self.start_at),b['text'])
             self.shown_ids={b['id'] for b in blocks if b['started'] is not None}
-        if hasattr(self,'session_cost_var') and self.running:
-            suffix=f" · Bekleyen: {state['waiting']} + AI {state['translation_pending']} · okuma birikimi ≈ {state['backlog_seconds']:.1f} sn"
-            self.session_cost_var.set(self.session_cost_var.get()+suffix+(' · YOĞUNLUK YÜKSEK' if state['overloaded'] else ''))
+        if hasattr(self,'session_info_var') and self.running:
+            suffix=f" · Bekleyen: {state['waiting']} + çeviri {state['translation_pending']} · okuma birikimi ≈ {state['backlog_seconds']:.1f} sn"
+            self.session_info_var.set(self.session_info_var.get()+suffix+(' · YOĞUNLUK YÜKSEK' if state['overloaded'] else ''))
         if not self.closing:self.pump_after = self.root.after(20, self.pump)
 
     def close(self):
@@ -844,12 +727,11 @@ class MainWindow:
         if getattr(self,'close_after',None) is not None:
             self.root.after_cancel(self.close_after);self.close_after=None
         if any(worker.is_alive() for worker in self.workers):
-            self.status_var.set('Kapanıyor: işlemler ve harcama kaydı bekleniyor...')
+            self.status_var.set('Kapanıyor: yerel işlemler bekleniyor...')
             self.close_after=self.root.after(100, self._finish_close)
             return
         for worker in self.workers:
             worker.join()
-        self._store_ledger()
         if self.subtitle_store is not None:
             self._save_session_metrics()
             self.subtitle_store.close()

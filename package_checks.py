@@ -1,4 +1,4 @@
-"""Optional isolated packaged smoke test; never reads the user's OpenAI key."""
+"""Optional isolated packaged smoke test; uses temporary local settings and no cloud SDK."""
 from contextlib import ExitStack
 from copy import deepcopy
 import json
@@ -15,26 +15,13 @@ from PIL import Image,ImageDraw,ImageFont
 
 def run(args):
     import app
-    from core import DEFAULTS,load_settings,atomic_json,TranslationEngine,BudgetLedger,ContextMemory
+    from core import DEFAULTS,load_settings,atomic_json
     from overlay_server import launch_server
     from region_profiles import with_region
-    import cv2,comtypes,pygrabber,onnxruntime,rapidocr,openai
-    import httpx2
+    import cv2,comtypes,pygrabber,onnxruntime,rapidocr
     settings=load_settings() if args.real_camera else with_region(deepcopy(DEFAULTS),'Örnek Oyun',(0,.65,1,.94))
     password=app.secret_get('obs_password') if args.real_camera else ''
-    report=dict(ok=False,frozen=bool(getattr(__import__('sys'),'frozen',False)),real_camera=args.real_camera,paid_requests=0)
-    original_api=openai.OpenAI;contracts=[]
-    for model in ('gpt-6-luna','gpt-6.1-terra','gpt-6.1-sol'):
-        def reply(request):
-            payload=json.loads(request.content);contracts.append(dict(model=payload['model'],effort=payload['reasoning']['effort']))
-            return httpx2.Response(200,json=dict(id='resp_local',object='response',created_at=0,status='completed',model=model,
-                output=[dict(type='message',id='msg_local',role='assistant',status='completed',content=[dict(type='output_text',text='Yerel test.',annotations=[])])],usage=dict(input_tokens=100,output_tokens=10,total_tokens=110)))
-        transport=httpx2.Client(transport=httpx2.MockTransport(reply))
-        with patch('openai.OpenAI',side_effect=lambda **kw:original_api(**kw,http_client=transport)):
-            engine=TranslationEngine('offline-package-test',model,ContextMemory('Test',''),BudgetLedger(0,1,10))
-            try:engine.translate('Local test.')
-            finally:engine.client.close()
-    report['mock_api_contracts']=contracts
+    report=dict(ok=False,frozen=bool(getattr(__import__('sys'),'frozen',False)),real_camera=args.real_camera,cloud_sdk_loaded=False)
     synthetic=Image.new('RGB',(960,540),'#24374d');draw=ImageDraw.Draw(synthetic)
     font=ImageFont.truetype('C:/Windows/Fonts/arial.ttf',24)
     draw.text((210,400),'Scout: Stay close. We are almost there.',font=font,fill='white')
@@ -51,17 +38,16 @@ def run(args):
         for target in ('app.config_folder','core.config_folder'):stack.enter_context(patch(target,return_value=folder))
         stack.enter_context(patch('app.secret_get',side_effect=lambda k:password if k=='obs_password' else ''))
         stack.enter_context(patch('app.secret_save'))
-        paid=stack.enter_context(patch('openai.OpenAI',side_effect=AssertionError('Paid API prohibited')))
         stack.enter_context(patch.object(app.MainWindow,'_make_capture_source',capture))
         stack.enter_context(patch('app.launch_server',side_effect=lambda state:launch_server(state,0)))
         root=tk.Tk();window=app.MainWindow(root)
         errors=[];root.report_callback_exception=lambda *exc:errors.append(exc[0].__name__)
-        window.model.set('gpt-6-luna');window.show_desktop.set(False)
+        window.show_desktop.set(False)
         if not args.real_camera:window.source.set('Synthetic raw input')
         window.diagnostic_mode.set(True);window.start()
         deadline=time.monotonic()+30;stage=[0];editor=[None];packets=set()
         def finish():
-            report.update(camera_opens=count[0],tk_errors=errors,paid_requests=paid.call_count)
+            report.update(camera_opens=count[0],tk_errors=errors,cloud_sdk_loaded=any(n=='openai' or n.startswith('openai.') for n in __import__('sys').modules))
             window.close()
         def poll():
             if time.monotonic()>deadline:
@@ -84,7 +70,7 @@ def run(args):
                           ('Scout','Tamam, sen yolu göster. Arkandan geliyorum.'),('Pilot','Hazır olduğunda hareket edelim.')]
                 for speaker,text in examples:
                     row=store.accept(session,'Synthetic test line',now,now,time.time(),now,.99,'package_test',speaker=speaker)
-                    job=store.enqueue_translation(session,row,'Synthetic test line','gpt-6-luna',now)
+                    job=store.enqueue_translation(session,row,'Synthetic test line','local:fixture',now)
                     store.complete_translation(job,text,now)
                 port=window.server.server_port
                 with urlopen(f'http://127.0.0.1:{port}/state') as response:state=json.load(response)
@@ -106,7 +92,7 @@ def run(args):
             root.after(80,poll)
         root.after(100,poll);root.mainloop()
         report['workers_closed']=all(not worker.is_alive() for worker in window.workers)
-        paid.assert_not_called()
+        assert not report['cloud_sdk_loaded']
     if getattr(args,'local_model',None):
         from light_translation import WarmNMTClient
         client=WarmNMTClient(args.local_python,args.local_model,device=args.local_device,

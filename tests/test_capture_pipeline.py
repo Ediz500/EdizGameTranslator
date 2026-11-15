@@ -172,8 +172,8 @@ class PipelineTests(unittest.TestCase):
     def test_diagnostic_worker_cannot_initialize_api(self):
         import app
         w = app.MainWindow.__new__(app.MainWindow)
-        with patch('app.TranslationEngine') as api:
-            w.translate_worker({'_diagnostic': True},None,None,None,None)
+        with patch('app.WarmNMTClient') as api:
+            w.translate_worker({'_diagnostic': True},None,None)
         api.assert_not_called()
 
     def test_capture_lock_and_obs_released_even_if_log_close_fails(self):
@@ -202,7 +202,7 @@ class PipelineTests(unittest.TestCase):
         w = app.MainWindow.__new__(app.MainWindow)
         w.diagnostic_active = True
         w.status_var = MagicMock()
-        with patch('app.TranslationEngine') as api, patch.object(w,'prepare') as prepare:
+        with patch('app.WarmNMTClient') as api, patch.object(w,'prepare') as prepare:
             w.test_ai()
         api.assert_not_called()
         prepare.assert_not_called()

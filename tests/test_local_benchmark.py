@@ -66,19 +66,21 @@ class LocalBenchmarkTests(unittest.TestCase):
         real_popen=subprocess.Popen
         script="import json;print(json.dumps({'error':'CUDA out of memory'}),flush=True)"
         def launch(command,**kwargs):return real_popen([sys.executable,'-u','-c',script],**kwargs)
-        with tempfile.TemporaryDirectory() as folder,patch('local_translation.subprocess.Popen',side_effect=launch),patch('openai.OpenAI') as paid:
+        with tempfile.TemporaryDirectory() as folder,patch('local_translation.subprocess.Popen',side_effect=launch):
             self.manifest(folder)
             with self.assertRaisesRegex(LocalWorkerError,'CUDA out of memory'):LocalWorkerClient(sys.executable,'milmmt-1b',folder)
-            paid.assert_not_called()
+
 
     def test_real_sqlite_export_is_readonly_unique_and_keeps_luna_reference(self):
         with tempfile.TemporaryDirectory() as folder:
             path=Path(folder)/'source.sqlite3';s=SubtitleStore(path)
+            s.db.execute('ALTER TABLE translation_jobs ADD COLUMN api_called INTEGER DEFAULT 0')
             for i in range(55):
                 row=s.accept('s',f'Scout: Take {i} crates to the old station.',i,i,i,i,.99,'test',speaker='Scout')
                 if i==0:
                     j=s.enqueue_translation('s',row,'Scout: Take 0 crates to the old station.','gpt-6-luna',i)
                     s.complete_translation(j,'Sandıkları götür.',i)
+                    s.db.execute('UPDATE translation_jobs SET api_called=1 WHERE id=?',(j,))
             s.close();before=hashlib.sha256(path.read_bytes()).hexdigest()
             corpus=export_corpus(path,50)
             self.assertEqual(corpus['selected'],50);self.assertTrue(corpus['target_met'])

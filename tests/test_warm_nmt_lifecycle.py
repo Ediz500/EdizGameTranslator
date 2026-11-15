@@ -47,8 +47,8 @@ for line in sys.stdin:threading.Thread(target=run,args=(json.loads(line),)).star
         real=subprocess.Popen
         script="import sys,json,time;print(json.dumps({'id':0,'ready':True}),flush=True);sys.stdin.readline();time.sleep(30)"
         def launch(command,**kwargs):return real([sys.executable,'-u','-c',script],**kwargs)
-        with tempfile.TemporaryDirectory() as folder,patch('light_translation.subprocess.Popen',side_effect=launch),patch('openai.OpenAI') as paid:
+        with tempfile.TemporaryDirectory() as folder,patch('light_translation.subprocess.Popen',side_effect=launch):
             self.folder(folder);c=WarmNMTClient(sys.executable,folder,threads=1,request_timeout=.1)
             with self.assertRaises(LocalEngineError):c.translate('Go!')
-            c.close();paid.assert_not_called()
+            c.close();
             self.assertIsNotNone(c.process.poll())

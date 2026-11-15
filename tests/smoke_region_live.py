@@ -31,7 +31,7 @@ def main():
     def ocr(profile):
         model_count[0]+=1
         return original_ocr(profile)
-    with tempfile.TemporaryDirectory() as folder,patch('app.load_settings',return_value=deepcopy(settings)),patch('app.config_folder',return_value=Path(folder)),patch('core.config_folder',return_value=Path(folder)),patch('app.secret_get',side_effect=lambda key:password if key=='obs_password' else ''),patch('app.secret_save'),patch('app.TranslationEngine') as api,patch.object(app.MainWindow,'_make_capture_source',new=source),patch('app.create_ocr',side_effect=ocr):
+    with tempfile.TemporaryDirectory() as folder,patch('app.load_settings',return_value=deepcopy(settings)),patch('app.config_folder',return_value=Path(folder)),patch('core.config_folder',return_value=Path(folder)),patch('app.secret_get',side_effect=lambda key:password if key=='obs_password' else ''),patch('app.secret_save'),patch('app.WarmNMTClient') as api,patch.object(app.MainWindow,'_make_capture_source',new=source),patch('app.create_ocr',side_effect=ocr):
         root=tk.Tk();window=app.MainWindow(root)
         if args.running:
             window.diagnostic_mode.set(True);window.diagnostic_logs.set(False);window.start()

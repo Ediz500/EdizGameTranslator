@@ -1,7 +1,6 @@
-"""Two-page Tk view. Capture, accounting and session ownership stay in app.py."""
+"""Two-page Tk view. Capture and session ownership stay in app.py."""
 import tkinter as tk
 from tkinter import ttk
-from core import PRICE_PER_MILLION
 from region_profiles import CROP_KEYS,game_names
 
 BG='#0e1621';CARD='#172333';INK='#edf3fa';MUTED='#9cacc0';ACCENT='#64d8c0'
@@ -90,12 +89,11 @@ def build_ui(w):
         entry.pack(side='right',fill='x',expand=True,padx=(18,0));return entry
     # The controller keeps typed variables for config compatibility. Technical
     # controls live only in Settings, some behind the advanced disclosure.
-    strings={'obs_port':'obs_port','source':'obs_source','model':'model','game':'game','budget':'budget_try',
-             'usd_try':'usd_try','font_var':'font_size','bottom_var':'overlay_bottom','interval':'scan_interval',
+    strings={'obs_port':'obs_port','source':'obs_source','game':'game',
+             'font_var':'font_size','bottom_var':'overlay_bottom','interval':'scan_interval',
              'capture_width':'capture_width','ocr_profile':'ocr_profile','camera_config':'camera_config'}
     for attr,key in strings.items():setattr(w,attr,tk.StringVar(value=str(s[key])))
     w.obs_password=tk.StringVar(value=w._get_secret('obs_password'))
-    w.api_key=tk.StringVar(value='')  # Historical key stays untouched in the OS vault.
     w.local_engine=tk.StringVar(value=s['translation_engine'])
     w.local_python=tk.StringVar(value=s['local_python'])
     w.local_model_path=tk.StringVar(value=s['local_model_path'])
@@ -125,14 +123,14 @@ def build_ui(w):
     tk.Label(rr,textvariable=w.crop_summary,bg=CARD,fg=INK,font=('Segoe UI',10)).pack(anchor='w',pady=4)
     ttk.Button(rr,text='OCR Bölgesini Düzenle…',command=w.open_region_editor).pack(anchor='w',pady=(5,0))
     control=card(home,'Canlı çeviri')
-    w.connection_var=tk.StringVar(value='OBS: Bekliyor     Kamera: Bekliyor     AI: Başlatılmadı')
+    w.connection_var=tk.StringVar(value='OBS: Bekliyor     Kamera: Bekliyor     Yerel: Başlatılmadı')
     tk.Label(control,textvariable=w.connection_var,bg=CARD,fg=MUTED,font=('Segoe UI',10),anchor='w').pack(fill='x',pady=(6,12))
     w.start_btn=ttk.Button(control,text='▶  ÇEVİRİYİ BAŞLAT',command=w.toggle_translation,style='Primary.TButton')
     w.start_btn.pack(fill='x')
     w.status_var=tk.StringVar(value='Hazır · Bağlantılar başlatıldığında doğrulanır.')
     tk.Label(control,textvariable=w.status_var,bg=CARD,fg=ACCENT,wraplength=650,anchor='w',justify='left',font=('Segoe UI',10)).pack(fill='x',pady=(12,3))
-    w.session_cost_var=tk.StringVar(value='Bu oturum ≈ 0,00 TL')
-    tk.Label(control,textvariable=w.session_cost_var,bg=CARD,fg=MUTED,font=('Segoe UI',9),anchor='w',wraplength=650,justify='left').pack(fill='x')
+    w.session_info_var=tk.StringVar(value='Yerel çeviri')
+    tk.Label(control,textvariable=w.session_info_var,bg=CARD,fg=MUTED,font=('Segoe UI',9),anchor='w',wraplength=650,justify='left').pack(fill='x')
     last=card(home,'Son replik')
     w.last_source_var=tk.StringVar(value='Henüz İngilizce replik algılanmadı.')
     w.last_translation_var=tk.StringVar(value='Türkçe çeviri burada görünecek.')
@@ -141,19 +139,19 @@ def build_ui(w):
         tk.Label(last,textvariable=var,bg=CARD,fg=color,wraplength=650,justify='left',anchor='w',font=('Segoe UI',11)).pack(fill='x')
     settings=pages['Ayarlar'].body
     ttk.Label(settings,text='Ayarlar',font=('Segoe UI',23,'bold')).pack(anchor='w',pady=(0,18))
-    api=card(settings,'Yerel çeviri','Model ayrı süreçte bir kez yüklenir. Otomatik indirme ve bulut fallback kapalıdır.')
-    field(api,'Yerel motor Python.exe',w.local_python)
-    field(api,'Model klasörü',w.local_model_path)
-    ttk.Button(api,text='Model klasörünü seç…',command=w._choose_local_model).pack(anchor='w')
-    r=row(api);label(r,'Çeviri modeli').pack(side='left')
+    local=card(settings,'Yerel çeviri','Model ayrı süreçte bir kez yüklenir. Otomatik indirme ve bulut fallback kapalıdır.')
+    field(local,'Yerel motor Python.exe',w.local_python)
+    field(local,'Model klasörü',w.local_model_path)
+    ttk.Button(local,text='Model klasörünü seç…',command=w._choose_local_model).pack(anchor='w')
+    r=row(local);label(r,'Çeviri modeli').pack(side='left')
     ttk.Combobox(r,textvariable=w.local_engine,values=['ct2-marian','argos-ct2'],state='readonly',width=23).pack(side='right')
-    r=row(api)
+    r=row(local)
     for title,var,values in [('Aygıt',w.local_device,['cpu','cuda']),('Hesaplama',w.local_compute,['int8','int8_float16','float32'])]:
         label(r,title).pack(side='left',padx=(0,8));ttk.Combobox(r,textvariable=var,values=values,state='readonly',width=14).pack(side='left',padx=(0,18))
-    field(api,'Eşzamanlı çeviri (CPU 1–4 / GPU 1)',w.local_workers)
-    field(api,'İşçi başına CPU iş parçacığı',w.local_threads)
-    w.cost_var=tk.StringVar()
-    tk.Label(api,textvariable=w.cost_var,bg=CARD,fg=MUTED,wraplength=650,justify='left',anchor='w',font=('Segoe UI',9)).pack(fill='x',pady=6)
+    field(local,'Eşzamanlı çeviri (CPU 1–4 / GPU 1)',w.local_workers)
+    field(local,'İşçi başına CPU iş parçacığı',w.local_threads)
+    w.engine_info_var=tk.StringVar()
+    tk.Label(local,textvariable=w.engine_info_var,bg=CARD,fg=MUTED,wraplength=650,justify='left',anchor='w',font=('Segoe UI',9)).pack(fill='x',pady=6)
     output=card(settings,'Altyazı görünümü','OBS Browser Source adresi ve mevcut TV/yayın düzeni korunur.')
     r=row(output);field(output,'Yazı boyutu',w.font_var);field(output,'Alttan mesafe (%)',w.bottom_var)
     ttk.Checkbutton(output,text='Windows monitöründe de göster',variable=w.show_desktop).pack(anchor='w')
@@ -162,7 +160,7 @@ def build_ui(w):
     r=row(tools);label(r,'Ham capture card kaynağı').pack(side='left')
     w.source_combo=ttk.Combobox(r,textvariable=w.source,state='readonly');w.source_combo.pack(side='left',fill='x',expand=True,padx=10)
     ttk.Button(r,text='Kaynakları getir',command=w.load_sources).pack(side='right')
-    ttk.Checkbutton(tools,text='API’siz OCR tanılama modu',variable=w.diagnostic_mode).pack(anchor='w')
+    ttk.Checkbutton(tools,text='Yalnız OCR tanılama modu',variable=w.diagnostic_mode).pack(anchor='w')
     ttk.Checkbutton(tools,text='Ayrıntılı yerel günlük (hassas OCR metni içerir)',variable=w.diagnostic_logs).pack(anchor='w')
     r=row(tools)
     for title,cmd in [('OCR testi',w.test_ocr),('Yerel çeviri testi',w.test_ai),('Örnek altyazı',w.demo)]:

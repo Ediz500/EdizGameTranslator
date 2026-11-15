@@ -1,4 +1,4 @@
-"""Settings and punctuation-preserving cache regressions."""
+"""Settings allowlist and malformed-file regressions."""
 import importlib.util
 import json
 from pathlib import Path
@@ -11,7 +11,7 @@ import unittest
 from unittest.mock import MagicMock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from core import BudgetLedger, ContextMemory, TranslationEngine, load_settings, save_settings
+from core import load_settings, save_settings
 
 
 class AuditTests(unittest.TestCase):
@@ -28,11 +28,6 @@ class AuditTests(unittest.TestCase):
             (Path(folder) / 'settings.json').write_text('[]')
             with patch('core.config_folder', return_value=Path(folder)):
                 self.assertEqual(load_settings()['obs_port'], 4455)
-
-    def test_cache_preserves_meaningful_punctuation(self):
-        memory = ContextMemory('Test', '')
-        memory.remember('gpt-6.1-sol', "We're here.", 'Buradayız.')
-        self.assertIsNone(memory.cached('gpt-6.1-sol', 'Were here?'))
 
 
 if __name__ == '__main__':
