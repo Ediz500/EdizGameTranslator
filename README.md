@@ -1,5 +1,10 @@
 # EdizGameTranslator
 
+Bu dal **düşük gecikmeli yerel geliştirme sürümüdür**. Canlı yol internet veya
+ücretli API kullanmaz. Ana sürümden ayrı profil ile denenmelidir. Gerçek PS5
+uçtan uca hedefleri henüz doğrulanmadı; ölçümler ve sınırlamalar
+[PERFORMANS_YEREL.md](PERFORMANS_YEREL.md) dosyasındadır.
+
 Windows üzerinde PS5/capture card görüntüsündeki İngilizce oyun diyaloglarını
 OCR ile okuyup Türkçe altyazıya çeviren masaüstü uygulaması. Tkinter arayüzü,
 OBS Browser Source çıktısı ve masaüstü overlay'i içerir. En fazla üç altyazı
@@ -14,8 +19,8 @@ depoya dahil edilmez.
 - Windows x64 ve resmî **CPython 3.12 x64**. MSYS2 Python desteklenmez.
 - OBS Studio, OBS WebSocket ve OBS Virtual Camera.
 - DirectShow üzerinden OBS'ye görüntü veren bir HDMI capture card.
-- Bulut çevirisi için internet, OpenAI hesabında seçilen modele erişim ve API
-  anahtarı. Bu kullanım ücretlidir.
+- Canlı çeviri için ayrı Python ortamında CTranslate2 ve önceden hazırlanmış
+  doğrudan EN→TR model dosyaları. Model yoksa açık hata gösterilir.
 - OCR ana uygulamada CPU/ONNX Runtime üzerinde çalışır; CUDA zorunlu değildir.
   Yerel çeviri benchmark'ı için ayrı CUDA ortamı ve yeterli GPU belleği gerekir.
 
@@ -55,7 +60,7 @@ internet gerekir. Ana uygulamanın OCR modelini önceden hazırlamak için:
 
 RapidOCR kendi sürümünün model yapılandırmasını kullanır. Ağırlık dosyalarını
 bu depoya kopyalamayın. İnternetsiz OCR denemesini gerekli dosyalar kurulduktan
-sonra yapın. Bulut çevirisi ayrıca internet gerektirir.
+sonra yapın. Yerel çeviri de ağırlıklar hazırlandıktan sonra ağsız çalışır.
 
 ## PS5, capture card ve OBS bağlantısı
 
@@ -72,8 +77,8 @@ sonra yapın. Bulut çevirisi ayrıca internet gerektirir.
    gelişmiş ayarlardan kendi koleksiyon dosyanızı belirtin.
 6. Oyunu seçin ve **OCR Bölgesini Düzenle** ile İngilizce altyazının bulunduğu
    bölgeyi işaretleyin. İlk denemeyi **API'siz OCR tanılama** modunda yapın.
-7. Kaynak doğrulandıktan sonra bulut çevirisini kullanmak istiyorsanız API
-   anahtarını, modeli ve bütçeyi kendi hesabınıza göre yapılandırın.
+7. Kaynak doğrulandıktan sonra yerel Python yolunu, model klasörünü ve CPU/CUDA
+   aygıtını seçin. CUDA için eşzamanlılığı 1 ve hesaplamayı `int8_float16` yapın.
 
 OBS çıkışı yalnız güvenli, filtresiz ham kaynak olarak doğrulanırsa yakalama
 başlar. Browser Source, OBS program görüntüsü veya overlay'i tekrar yakalayan
@@ -103,34 +108,118 @@ OCR/noktalama onarımları karşılaştırmada kullanılır; isim, sayı, olumsu
 anlam değişimleri için korumalar vardır. Kısa gerçek tekrarlar ayrı ele alınır.
 Ham gözlemler ve kanonik düzeltmeler yerel SQLite kaydında korunur.
 
-Çeviri ve gösterim işleri SQLite FIFO'sunda tutulur. Yeni İngilizce satır veya
+SQLite işlerin kalıcı günlüğüdür. Sınırlı sayıda işçi bağımsız replikleri işler;
+aynı repliğin revizyonları eşzamanlı çevrilmez. Hazır sonuçlar, önceki eksik
+işi beklemeden üç gösterim alanından boş olana alınır. Yeni İngilizce satır veya
 boş OCR karesi, okunmakta olan Türkçe altyazıyı hemen silmez. Üç bağımsız gösterim
 alanı vardır; dördüncü iş bekler. Sayaç renderer bildiriminden sonra başlar.
 Durdurma, kapanış ve kaynak güvenliği kaybı açık oturumun gösterimini iptal eder.
+Kısa `Go!`, `No!`, `Oh!`, `Hi!` ve `Thank You` gerçek OCR filtre hattında korunur.
+`Mr. Fisk`, `Dr. Connors`, `MJ` konuşmacı sınırları ayrıca test edilir.
 
-## Çeviri motorları
+Varsayılan OCR aralığı 40 ms hedeflidir; gerçek OCR maliyeti daha yüksekse eski
+kare kuyruğu oluşturulmaz. İsteğe bağlı adaptif mod, ROI farkını 20 ms hedefle
+kontrol eder ve 150 ms içinde zorunlu OCR taraması yapar. Gerçek oyun recall'ı
+etiketlenene kadar varsayılan sabit hızlı moddur. OBS canlı yön, kaynak/filtre
+ve sanal kamera kontrolleri her kare öncesi ve sonrası korunur. Değişmeyen
+koleksiyon dosyasının JSON ayrıştırması stat imzasıyla yeniden kullanılır.
 
-Ana GUI'nin mevcut seçenekleri:
+Overlay adresi değişmez. SSE varsayılandır; bağlantı hatasında 100 ms polling'e
+döner. Tarayıcı bağlıyken masaüstü onayı sayacı erken başlatmaz. Her bloğun
+sayacı bağımsızdır; DOM onayı fiziksel TV görünme kanıtı değildir.
 
-| Seçenek | Model kimliği | Durum |
-|---|---|---|
-| GPT-6 Luna | `gpt-6-luna` | Varsayılan bulut motoru |
-| GPT-6.1 Terra | `gpt-6.1-terra` | Bulut motoru |
-| GPT-6.1 Sol | `gpt-6.1-sol` | Bulut motoru |
+## Canlı yerel çeviri motoru
 
-Model kimlikleri uygulamanın mevcut `model_config.py` sözleşmeleridir. Hesabınızın
-model erişimini ayrıca kontrol edin. Uygulama önceki çevrilmiş replikleri ve
-kullanıcının oyun notlarını bağlam olarak kullanır; yalnız yeni repliği çevirir.
-Yerel bütçe defteri yaklaşık harcamayı izler; sağlayıcının kesin fatura sınırı
-yerine geçmez. AI testi de gerçek API çağrısı yapar ve ücretlidir.
+Ölçülen aday [OPUS-MT EN→TR](https://huggingface.co/Helsinki-NLP/opus-mt-tc-big-en-tr),
+CC-BY-4.0 lisanslı doğrudan çeviri modelidir. CTranslate2 INT8 dönüşümü CPU'da
+ve RTX 3060'da çalıştırıldı. Ağırlık yaklaşık 227 MiB; indirme kaynağı yaklaşık
+470 MB'dir. Konuşmacı etiketi modelden ayrılarak saklanır. Beam 4, belirgin bir
+anlam hatasını beam 1'e göre düzelttiği için geliştirme varsayılanıdır; uzun ve
+deyimli repliklerde hâlâ anlam kaybı vardır. Kalite onayı verilmiş ürün değildir.
 
-Yerel modeller şu anda **GUI seçeneği değil, ayrı benchmark altyapısıdır**.
-Ölçülmüş bir yerel hız/kalite kazananı seçilmemiştir. 500–800 ms uçtan uca hedefi
-henüz doğrulanmamıştır. Yerel model hatasında ücretli API'ye otomatik dönüş yoktur.
+GUI, ayrı Python alt sürecini oturum başında bir kez yükler ve sıcak tutar.
+CPU'da 1–4 işçi, GPU'da bu sürümde 1 işçi sınırı vardır; toplam CPU thread sınırı
+kontrol edilir. Süre aşımı/çökme açık hata verir, otomatik bulut dönüşü yoktur.
+Luna/Terra/Sol kaynak kodu ve SDK sözleşme testleri tarihsel uyumluluk için
+korunur; canlı yol ve GUI test düğmesi yerel motor kullanır. Anahtar ve geçmiş
+bütçe kayıtları bu çalışma için değiştirilmez, yeni API ücreti oluşturulmaz.
 
-## İsteğe bağlı yerel çeviri modelleri
+Model indirmek tamamen isteğe bağlı ve açık bir CLI işlemidir. Ana uygulama
+ortamından ayrı ortam oluşturun:
 
-Bu adımlar yalnız yerel modelleri indirmek ve karşılaştırmak isteyenler içindir.
+```powershell
+py -3.12 -m venv .venv-nmt
+.\.venv-nmt\Scripts\python.exe -m pip install -r requirements-light.txt
+# Tek seferlik dönüşüm için (yalnız ağırlıkları indirmeyi seçtiyseniz):
+.\.venv-nmt\Scripts\python.exe -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+.\.venv-nmt\Scripts\python.exe -m pip install -r requirements-convert.txt
+.\.venv-nmt\Scripts\python.exe prepare_light_model.py --allow-download --output models\opus-en-tr
+```
+
+GUI'de Python olarak `.venv-nmt\Scripts\python.exe`, model olarak
+`models\opus-en-tr\ct2-int8` klasörünün tam yolunu seçin. Çalıştırma için Torch
+gerekmemektedir; hazır model taşındığında `requirements-light.txt` yeterlidir.
+Manifest sabit model revizyonu ve dosya SHA-256 değerlerini denetler. Marian
+encoder-decoder modeli chat promptu kullanmaz; kaynak SentencePiece + EOS
+tokenlarıyla çalışır. MiLMMT/TranslateGemma şablonlarıyla karıştırılmamalıdır.
+
+CUDA için [resmî CTranslate2 kurulum koşulları](https://opennmt.net/CTranslate2/installation.html)
+geçerlidir: Windows x64, uygun NVIDIA sürücüsü, CUDA 12 ve Visual C++ runtime.
+Bu bilgisayarda sistem CUDA'sına dokunmadan ayrı ortamda aşağıdaki NVIDIA
+paketleriyle doğrulandı; bunlar ek ve büyük indirmelerdir:
+
+```powershell
+.\.venv-nmt\Scripts\python.exe -m pip install nvidia-cublas-cu12==12.9.2.10 nvidia-cuda-runtime-cu12==12.9.79
+```
+
+İşçi yalnız kendi sürecinde DLL arama yolunu ayarlar. Aygıt `cuda`, hesaplama
+`int8_float16`, işçi `1`, thread `2` seçin. CPU için `cpu`, `int8`, işçi `2`,
+thread `2` başlangıç ayarıdır. Model ve bağımlılıklar kurulduktan sonra çevrimdışı
+test edin. İlk yerel test ve ilk OCR çağrısı ısınma süresi içerir.
+
+Argos'un [resmî paket dizininde](https://github.com/argosopentech/argospm-index)
+doğrudan EN→TR 1.5 paketi bulunur; bu çalışmada indirilmedi/ölçülmedi. GUI'deki
+`argos-ct2` manifest türü hazır, doğrulanmış CT2 paketi içindir; ham `.argosmodel`
+dosyasını otomatik kuran bir yol bulunmaz. Henüz hazır kurulum adayı sayılmamalıdır.
+[NLLB-600M](https://huggingface.co/facebook/nllb-200-distilled-600M) CC-BY-NC-4.0
+lisanslıdır; ticari olmayan koşulları nedeniyle yalnız araştırma adayıdır ve
+burada indirilmedi. CouchSubs oyun paketi yaklaşımı incelendi; AGPL kaynak kodu
+kopyalanmadı. Basit, özgün lookup sırası: incelenmiş oyun paketi → aynı oyun,
+konuşmacı ve önceki iki kaynak replikle eşleşen bellek → yerel model. Üç kelime
+ve altı kısa ifadeler otomatik belleğe alınmaz; hazır pakette açık bağlam gerekir.
+
+### Ayrı geliştirme profili
+
+Çalışan sürümün ayar/SQLite/harcama dosyalarına dokunmadan denemek için boş bir
+klasör seçin. Ortam değişkeni yalnız başlattığınız süreç ve çocukları için geçer:
+
+```powershell
+$env:EDIZ_CONFIG_DIR = "$PWD\benchmark-private\development-profile"
+.\BASLAT.bat
+```
+
+Bu profil gerçek OBS kaynak adınızı ve yerel model yollarınızı GUI'den ayrı
+girmeyi gerektirir; mevcut ayarlar üzerine örnek JSON kopyalamayın.
+
+### Hafif model benchmark
+
+```powershell
+.\.venv-nmt\Scripts\python.exe benchmark_light.py --model-path models\opus-en-tr\ct2-int8 --corpus benchmark-private\corpus.json --device cpu --workers 2 --threads 2 --beam-size 4 --output benchmark-private\opus-cpu.json
+# CUDA için: --device cuda --compute-type int8_float16 --workers 1
+```
+
+`--parallel` sabit kapasitede eşzamanlı yük denemesidir. Süreler tam çeviri
+sonucuna kadardır, ilk token süresi değildir. Kalite hata oranı insan incelemesi
+olmadan `null` kalır. Kaynak corpus, kaynak/çeviri metinleri ve ham raporlar özel
+kalır. `tests/benchmark_image_schedule.py` sentetik görüntü üzerinde gerçek OCR;
+`tests/benchmark_local_pressure.py` OBS açıkken sürekli sentetik OCR + gerçek
+CUDA modeli; `tests/benchmark_browser_transport.py` gerçek tarayıcı DOM-ACK
+karşılaştırmasıdır. Bunların hiçbiri gerçek PS5/TV uçtan uca testi değildir.
+
+## Korunan büyük model benchmark'ı
+
+Bu önceki altyapı korunur; bu görevde büyük modeller indirilmedi/ölçülmedi.
+Bu adımlar yalnız modelleri indirmek ve karşılaştırmak isteyenler içindir.
 Ana `.venv-win` ortamını değiştirmeyin:
 
 ```powershell
@@ -237,6 +326,13 @@ Paketleme sonucu `dist\EdizGameTranslator\EdizGameTranslator.exe` oluşur.
 EXE ve `_internal` dizini birlikte tutulmalıdır. Torch ve yerel çeviri ağırlıkları
 ana EXE'ye eklenmez. Yeni klonda hazır EXE bulunmaz; kaynak çalıştırma için
 `BASLAT.bat`, paket oluşturmak için `PAKETLE.bat` kullanılır.
+
+İsteğe bağlı paket testi gerçek modele kadar genişletilebilir; `--self-test`
+sentetik kamera ve geçici ayarlar kullanır, OBS'yi değiştirmez:
+
+```powershell
+.\dist\EdizGameTranslator\EdizGameTranslator.exe --self-test --report benchmark-private\package.json --local-python "$PWD\.venv-nmt\Scripts\python.exe" --local-model "$PWD\models\opus-en-tr\ct2-int8" --local-device cuda
+```
 
 ## Depo kapsamı
 

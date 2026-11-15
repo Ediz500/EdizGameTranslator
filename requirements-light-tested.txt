@@ -1,0 +1,8 @@
+# Reproduce the tested Windows Python 3.12 inference environment.
+# Conversion-only torch/transformers are optional; see README.
+ctranslate2==4.9.0
+sentencepiece==0.2.3
+psutil==7.2.2
+# CUDA-only optional additions (large downloads):
+# nvidia-cublas-cu12==12.9.2.10
+# nvidia-cuda-runtime-cu12==12.9.79
