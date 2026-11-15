@@ -62,6 +62,9 @@ class SubtitleStore:
             seen_mono REAL NOT NULL,PRIMARY KEY(job_id,renderer))''')
         self.db.execute('''CREATE TABLE IF NOT EXISTS translation_timings (
             job_id INTEGER PRIMARY KEY REFERENCES translation_jobs(id), metrics TEXT NOT NULL)''')
+        self.db.execute('''CREATE TABLE IF NOT EXISTS transport_events (
+            job_id INTEGER NOT NULL REFERENCES translation_jobs(id),transport TEXT NOT NULL,
+            sent_mono REAL NOT NULL,PRIMARY KEY(job_id,transport))''')
         self.db.execute("UPDATE translation_jobs SET display_state='cancelled',cancel_reason='process_restart' WHERE display_state NOT IN ('completed','cancelled','skipped')")
         self.db.execute("UPDATE translation_jobs SET translation_state='interrupted' WHERE translation_state IN ('queued','translating')")
         self.db.execute('PRAGMA user_version=3')
@@ -220,6 +223,11 @@ class SubtitleStore:
             self.db.execute('''INSERT OR IGNORE INTO render_acks(job_id,renderer,seen_mono)
                 SELECT id,?,? FROM translation_jobs WHERE id=? AND display_state IN ('offered','showing')''',(renderer,now,job))
 
+    def transport_sent(self,ids,transport,now):
+        with self.lock,self.db:
+            self.db.executemany('INSERT OR IGNORE INTO transport_events VALUES (?,?,?)',
+                                [(job,transport,now) for job in ids])
+
     def display_event(self,job,event,now,renderer=None):
         if event not in ('sent','visible','ended'):raise ValueError('Gösterim olayı geçersiz.')
         with self.lock,self.db:
@@ -230,6 +238,7 @@ class SubtitleStore:
                 self.db.execute("UPDATE translation_jobs SET visible_mono=COALESCE(visible_mono,?),renderer=COALESCE(renderer,?),display_state='showing' WHERE id=? AND display_state='offered'",(now,renderer,job))
             else:
                 self.db.execute("UPDATE translation_jobs SET ended_mono=?,display_state='completed' WHERE id=? AND display_state='showing'",(now,job))
+            self.condition.notify_all()
 
     def queue_stats(self,session):
         with self.lock:
@@ -264,7 +273,7 @@ class SubtitleStore:
             stages['translation_total_ms']=percentiles([(r[3]-r[2])*1000 for r in records if r[2] is not None and r[3] is not None and r[6]=='completed'])
             measured=[json.loads(r[0]) for r in self.db.execute('''SELECT t.metrics FROM translation_timings t
                 JOIN translation_jobs j ON j.id=t.job_id WHERE j.session=? ORDER BY j.id DESC LIMIT 4096''',(session,))]
-            for stage in ('prepare_ms','request_call_ms','result_ms','engine_init_ms'):
+            for stage in ('prepare_ms','request_call_ms','result_ms','engine_init_ms','processing_ms','roundtrip_ms','capacity_wait_ms'):
                 stages[stage]=percentiles([r[stage] for r in measured if stage in r])
             stages['first_seen_to_renderer_ms']=percentiles([(v-f)*1000 for f,v in self.db.execute('''SELECT s.first_seen_mono,j.visible_mono
                 FROM translation_jobs j JOIN subtitles s ON s.id=j.subtitle_id WHERE j.session=? AND j.visible_mono IS NOT NULL''',(session,))])

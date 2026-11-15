@@ -24,8 +24,8 @@ def benchmark(args):
                 repeat,e=item;began=time.perf_counter()
                 try:
                     result=client.translate(e['source'])
-                    return dict(id=e['id'],repeat=repeat,source=e['source'],length_group=e['length_group'],
-                                submitted_to_complete_ms=(time.perf_counter()-began)*1000,**result)
+                    return dict(result,id=e['id'],repeat=repeat,source=e['source'],length_group=e['length_group'],
+                                submitted_to_complete_ms=(time.perf_counter()-began)*1000)
                 except Exception as exc:return dict(id=e['id'],repeat=repeat,complete=False,error=str(exc),length_group=e['length_group'])
             jobs=[(r,e) for r in range(args.repeats) for e in corpus['entries']]
             with ThreadPoolExecutor(max_workers=args.workers if args.parallel else 1) as pool:

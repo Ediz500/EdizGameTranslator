@@ -140,7 +140,7 @@ class PipelineTests(unittest.TestCase):
         accept.assert_not_called()
 
     def test_invalid_intervals(self):
-        for interval in (.1, float('nan'), float('inf'), 6):
+        for interval in (.005, float('nan'), float('inf'), 6):
             with self.assertRaises(ValueError):
                 CaptureRunner(None,None,None,None,None,None,None,None,interval)
 

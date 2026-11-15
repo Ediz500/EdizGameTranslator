@@ -116,6 +116,13 @@ class WarmNMTClient:
 class CT2Translator:
     def __init__(self,args):
         began=time.perf_counter();folder,self.manifest=model_manifest(args.path)
+        self.dll_directories=[]
+        if sys.platform=='win32' and args.device=='cuda':
+            # Optional NVIDIA wheels are isolated in this interpreter. Keep DLL
+            # directory handles alive; never change the system PATH/CUDA install.
+            for package in ('cublas','cuda_runtime'):
+                directory=Path(sys.prefix)/'Lib'/'site-packages'/'nvidia'/package/'bin'
+                if directory.is_dir():self.dll_directories.append(os.add_dll_directory(str(directory)))
         import ctranslate2
         import sentencepiece
         supported=ctranslate2.get_supported_compute_types(args.device)
