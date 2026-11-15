@@ -18,6 +18,7 @@ def benchmark(args):
             began=time.perf_counter()
             client=WarmNMTClient(args.python,args.model_path,device=args.device,
                 compute_type=args.compute_type,workers=args.workers,threads=args.threads,
+                beam_size=args.beam_size,
                 on_start=lambda pid:setattr(sampler,'pid',pid))
             cold=(time.perf_counter()-began)*1000;ready=client.ready
             def run(item):
@@ -42,9 +43,14 @@ def benchmark(args):
             roundtrip_ms=percentiles([r['roundtrip_ms'] for r in good]),
             execution_failure_rate=(len(rows)-len(good))/len(rows) if rows else None)
     return dict(kind='real_local_model_only',device=args.device,compute_type=args.compute_type,
-        workers=args.workers,threads=args.threads,parallel=args.parallel,workload=args.workload,
+        workers=args.workers,threads=args.threads,beam_size=args.beam_size,parallel=args.parallel,workload=args.workload,
         workload_verified=False,cold_process_to_ready_ms=cold,ready=ready,error=error,groups=groups,
         results=results,resources=sampler.samples,quality_error_rate=None,paid_api_calls=0,
+        observed_process_names=sampler.observed_processes,
+        resource_summary={key:percentiles([s[key] for s in sampler.samples if key in s])
+            for key in ('worker_rss_mib','worker_cpu_one_core_percent','system_cpu_percent','ram_used_mib',
+                        'gpu_used_mib','gpu_free_mib','gpu_util_percent')},
+        resource_note='Worker RSS/CPU includes Windows venv launcher descendants. GPU/RAM totals are device/system-wide; 250 ms plus query overhead may miss peaks.',
         corpus_sha256=hashlib.sha256(Path(args.corpus).read_bytes()).hexdigest(),
         limitation='No capture/OCR/render/physical TV timing included. No quality grade inferred from execution success.')
 
@@ -55,6 +61,7 @@ if __name__=='__main__':
     p.add_argument('--output',required=True);p.add_argument('--device',choices=['cpu','cuda'],default='cpu')
     p.add_argument('--compute-type',default='int8');p.add_argument('--workers',type=int,default=2)
     p.add_argument('--threads',type=int,default=2);p.add_argument('--repeats',type=int,default=3)
+    p.add_argument('--beam-size',type=int,choices=[1,2,4],default=1)
     p.add_argument('--parallel',action='store_true');p.add_argument('--workload',choices=['idle','obs-ocr'],default='idle')
     a=p.parse_args()
     if Path(a.output).exists():raise FileExistsError('Choose a new report')

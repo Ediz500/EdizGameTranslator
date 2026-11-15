@@ -149,7 +149,12 @@ class ResourceSampler:
             if self.pid:
                 try:
                     process=p.Process(self.pid)
-                    sample.update(worker_rss_mib=process.memory_info().rss/2**20,worker_cpu_seconds=sum(process.cpu_times()[:2]))
+                    # Windows venv launchers delegate to a child python.exe.
+                    # Account for the entire owned process tree, not just the launcher.
+                    processes=[process]+process.children(recursive=True)
+                    sample.update(worker_rss_mib=sum(x.memory_info().rss for x in processes)/2**20,
+                                  worker_cpu_seconds=sum(sum(x.cpu_times()[:2]) for x in processes),
+                                  worker_process_count=len(processes))
                     if last_cpu:
                         sample['worker_cpu_one_core_percent']=100*(sample['worker_cpu_seconds']-last_cpu[1])/(sample['at']-last_cpu[0])
                     last_cpu=(sample['at'],sample['worker_cpu_seconds'])
