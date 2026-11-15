@@ -2,6 +2,7 @@
 import json
 import os
 import re
+import time
 from pathlib import Path
 
 
@@ -131,6 +132,8 @@ class VirtualCamera:
         self.path=Path(config_path)
         self.source=source
         self.validator=validator
+        self._config_signature=None;self._config_data=None
+        self.last_timing={}
         self._check()
         # Do not try physical camera 0 or fall back to another video backend.
         self.cap=cv2.VideoCapture(obs_camera_index(),cv2.CAP_DSHOW)
@@ -142,18 +145,35 @@ class VirtualCamera:
         self.cap.set(cv2.CAP_PROP_BUFFERSIZE,1)  # Advisory only; continuous draining is the guarantee.
 
     def _check(self):
-        data=json.loads(self.path.read_text(encoding='utf-8'))
+        began=time.perf_counter()
+        stat=self.path.stat();signature=(stat.st_mtime_ns,stat.st_size,stat.st_ino)
+        stated=time.perf_counter()
+        reread=signature!=self._config_signature
+        if reread:
+            data=json.loads(self.path.read_text(encoding='utf-8'))
+            after=self.path.stat()
+            if signature!=(after.st_mtime_ns,after.st_size,after.st_ino):
+                raise CaptureConfigurationError('OBS koleksiyonu okuma sırasında değişti.')
+            self._config_data=data;self._config_signature=signature
+        data=self._config_data
+        parsed=time.perf_counter()
         validate_raw_source_config(data,self.source)
         if self.validator:
             self.validator(data['name'],self.source)
+        ended=time.perf_counter()
+        return dict(config_stat_ms=(stated-began)*1000,config_read_parse_ms=(parsed-stated)*1000,
+                    config_reread=reread,live_guard_ms=(ended-parsed)*1000)
 
     def read(self):
-        self._check()  # Fail closed if the saved camera route changes.
+        pre=self._check()  # Live route and all WebSocket checks stay per-frame.
+        began=time.perf_counter()
         ok,frame=self.cap.read()
-        self._check()  # Discard a frame if the route changed during a blocking read.
+        read=time.perf_counter()
+        post=self._check()  # Discard if route changed during a blocking read.
         if not ok:
             raise RuntimeError('OBS Virtual Camera returned no frame')
         from PIL import Image
+        self.last_timing=dict(pre=pre,post=post,camera_read_ms=(read-began)*1000)
         return Image.fromarray(self.cv2.cvtColor(frame,self.cv2.COLOR_BGR2RGB))
 
     def close(self):
