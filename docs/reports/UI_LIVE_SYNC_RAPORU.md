@@ -39,7 +39,7 @@ VRAM tüm aygıtı, RSS işçi ve Windows launcher alt süreçlerini kapsar. 250
 
 ## Doğrulama
 
-- Başlangıçta 180 test geçti. Son tam koşuda **200/200 test geçti**; 100,4 saniye.
+- Başlangıçta 180 test geçti. Son tam koşuda **201/201 test geçti; 96,5 saniye**. Temiz Git kopyasındaki önceki 200 test de 90,5 saniyede geçti.
 - Yeni regresyonlar: iki boş gözlem/debounce, tek kare kurtarma, geç yanıtın geçmişte kalması, üç aktif kaynak, düzeltme/genişleme, kısa gerçek tekrar, farklı konuşmacı, oturum güvenliği, maskenin ham görüntüyü değiştirmemesi, koordinat/letterbox, isim rengi/gizleme, boşken maskenin kalkması, legacy SQLite ve yükleme iptali.
 - Gerçek Windows GUI testleri %125/%150 uygulama içi widget/pencere ölçeklemesiyle çalıştı; ana kontrollerin pencere içinde kaldığı ve beş sayfanın erişilebilir olduğu doğrulandı. Windows’un gerçek DPI ayarı değiştirilmedi. %150 sentetik pencere ayrıca görsel incelendi ve ekran içinde ortalandı. Çok monitör/per-monitor DPI geçişi ayrıca gerçek kullanım testi gerektirir.
 - `pip check` temiz. Paket kaynakları ve import yolları yeni `src` yapısına taşındı; BAT/spec güncellendi. Tanılama kaynaklarının `.gitignore` tarafından yanlış dışlanmasına özel istisna eklendi.

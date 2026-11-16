@@ -79,6 +79,13 @@ class SessionTests(unittest.TestCase):
         w.stop.assert_called_once()
         w.root.after.assert_called_once()
 
+    def test_actionable_error_remains_visible_after_safety_stop(self):
+        w=self.window
+        w.post_session(2,'error','Yerel model klasörü bulunamadı; Bağlantılar sayfasından seçin.')
+        w.post_session(2,'stopped')
+        w.pump()
+        w.status_var.set.assert_called_with('Güvenlik için durduruldu. Yerel model klasörü bulunamadı; Bağlantılar sayfasından seçin.')
+
     def test_close_waits_for_workers_before_destroy(self):
         w = self.window
         worker = MagicMock()

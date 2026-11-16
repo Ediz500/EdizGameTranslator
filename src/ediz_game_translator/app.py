@@ -92,6 +92,7 @@ class MainWindow:
         self.close_after=None
         self.metrics_saved_session=None
         self.local_coordinator=None
+        self.last_error=None
         self._make_ui()
         self.game.trace_add('write',self._load_game_region)
         self._load_game_region()
@@ -495,6 +496,7 @@ class MainWindow:
         s['_capture_session'] = uuid.uuid4().hex
         s['_diagnostic'] = diagnostic
         s['_log_path'] = (config_folder() / 'diagnostics' / (s['_capture_session'] + '.jsonl')) if detailed else None
+        self.last_error=None
         self.diagnostic_active = diagnostic
         self.overlay_state.clear()
         self.running = True
@@ -728,10 +730,12 @@ class MainWindow:
                     self.status_var.set(args[0])
                 elif kind == "error":
                     self.log("HATA: " + args[0])
-                    self.status_var.set("Hata · ayrıntılar günlükte")
+                    self.last_error=args[0]
+                    self.status_var.set("Hata · "+args[0])
                 elif kind == "stopped":
                     self.stop()
                     if args:self.status_var.set('Güvenlik için durduruldu. '+args[0])
+                    elif getattr(self,'last_error',None):self.status_var.set('Güvenlik için durduruldu. '+self.last_error)
         except queue.Empty:
             pass
         engine=getattr(getattr(self,'local_coordinator',None),'engine',None)
