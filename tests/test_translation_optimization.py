@@ -1,11 +1,13 @@
+from bootstrap import configure_paths
+configure_paths()
 import unittest
 from types import SimpleNamespace
 from unittest.mock import MagicMock,patch
 
-from subtitle_tracking import ActiveSubtitles,equivalent,continuation
-from subtitle_store import SubtitleStore
-from capture_pipeline import CaptureRunner,DiagnosticLog
-from frame_sources import FramePacket
+from ediz_game_translator.capture.subtitle_tracking import ActiveSubtitles,equivalent,continuation
+from ediz_game_translator.storage.subtitle_store import SubtitleStore
+from ediz_game_translator.capture.capture_pipeline import CaptureRunner,DiagnosticLog
+from ediz_game_translator.capture.frame_sources import FramePacket
 from test_subtitle_tracking import candidate
 
 
@@ -88,7 +90,7 @@ class DedupRegressionTests(unittest.TestCase):
         finally:s.close()
 
     def test_timing_stages_and_three_independent_counters(self):
-        from subtitle_display import DisplayManager
+        from ediz_game_translator.subtitles.subtitle_display import DisplayManager
         s=SubtitleStore(':memory:');clock=[2.]
         try:
             ids=[]

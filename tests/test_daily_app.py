@@ -1,4 +1,6 @@
 """Daily-use transition regressions. No paid API or physical camera calls."""
+from bootstrap import configure_paths
+configure_paths()
 from copy import deepcopy
 import json
 from pathlib import Path
@@ -13,18 +15,18 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import MagicMock, patch
 
-from core import DEFAULTS, load_settings
-import region_profiles as profiles
-import virtual_camera as camera
+from ediz_game_translator.core import DEFAULTS, load_settings
+from ediz_game_translator.storage import region_profiles as profiles
+from ediz_game_translator.capture import virtual_camera as camera
 
 
 class TransitionTests(unittest.TestCase):
     def test_production_obs_client_has_no_screenshot_path(self):
-        from obs_capture import ObsSource
+        from ediz_game_translator.capture.obs_capture import ObsSource
         self.assertFalse(hasattr(ObsSource,'frame'))
 
     def test_legacy_capture_migrates_without_losing_user_data(self):
-        with tempfile.TemporaryDirectory() as folder, patch('core.config_folder',return_value=Path(folder)):
+        with tempfile.TemporaryDirectory() as folder, patch('ediz_game_translator.core.config_folder',return_value=Path(folder)):
             old=deepcopy(DEFAULTS)
             old.update(capture_method='websocket',game='Legacy',crop_top=52,budget_try=321,
                        estimated_total_usd=1.25,token_total_in=987,lore='Existing note')
@@ -66,7 +68,7 @@ class TransitionTests(unittest.TestCase):
             with self.assertRaises(ValueError):guard.check('Raw')
 
     def test_live_camera_needs_live_validator_before_device_open(self):
-        with patch('virtual_camera.obs_camera_index') as index:
+        with patch('ediz_game_translator.capture.virtual_camera.obs_camera_index') as index:
             with self.assertRaises(camera.CaptureConfigurationError):
                 camera.VirtualCamera('missing','Raw',diagnostic=False)
         index.assert_not_called()
@@ -98,15 +100,17 @@ class TransitionTests(unittest.TestCase):
 class DailyGuiTests(unittest.TestCase):
     """Real controller, tracking, SQLite, local engine, HTTP and Tk. Mock I/O only."""
     def setUp(self):
-        import app,tkinter as tk,numpy as np
+        from ediz_game_translator import app
+        import tkinter as tk
+        import numpy as np
         self.app=app;self.stack=ExitStack()
         self.folder=Path(self.stack.enter_context(tempfile.TemporaryDirectory()))
-        for target in ('app.config_folder','core.config_folder'):
+        for target in ('ediz_game_translator.app.config_folder','ediz_game_translator.core.config_folder'):
             self.stack.enter_context(patch(target,return_value=self.folder))
-        self.stack.enter_context(patch('app.secret_get',return_value=''))
-        self.secret_save=self.stack.enter_context(patch('app.secret_save'))
-        self.message=self.stack.enter_context(patch('app.messagebox.showerror'))
-        self.stack.enter_context(patch('app.messagebox.showwarning'))
+        self.stack.enter_context(patch('ediz_game_translator.app.secret_get',return_value=''))
+        self.secret_save=self.stack.enter_context(patch('ediz_game_translator.app.secret_save'))
+        self.message=self.stack.enter_context(patch('ediz_game_translator.app.messagebox.showerror'))
+        self.stack.enter_context(patch('ediz_game_translator.app.messagebox.showwarning'))
         self.obs=MagicMock()
         c=self.obs.client
         c.get_scene_collection_list.return_value.current_scene_collection_name='Test'
@@ -114,21 +118,22 @@ class DailyGuiTests(unittest.TestCase):
         c.get_input_settings.return_value=SimpleNamespace(input_kind='dshow_input',input_settings={'video_device_id':'raw-card'})
         c.get_source_filter_list.return_value.filters=[]
         self.stack.enter_context(patch.object(app.MainWindow,'_obs',return_value=self.obs))
-        self.route=self.stack.enter_context(patch('virtual_camera.RouteLog')).return_value
-        self.stack.enter_context(patch('virtual_camera.obs_camera_index',return_value=7))
+        self.route=self.stack.enter_context(patch('ediz_game_translator.capture.virtual_camera.RouteLog')).return_value
+        self.stack.enter_context(patch('ediz_game_translator.capture.virtual_camera.obs_camera_index',return_value=7))
         self.cap=MagicMock();pixels=np.zeros((540,960,3),dtype=np.uint8)
         def read():time.sleep(.015);return True,pixels
         self.cap.read.side_effect=read
         self.device=self.stack.enter_context(patch('cv2.VideoCapture',return_value=self.cap))
-        self.ocr=self.stack.enter_context(patch('app.create_ocr')).return_value
+        self.ocr=self.stack.enter_context(patch('ediz_game_translator.app.create_ocr')).return_value
         self.ocr.return_value=SimpleNamespace(txts=['Follow me!'],scores=[.99],boxes=None)
         from cloud_guard import NoCloudImports
         self.cloud_guard=self.stack.enter_context(NoCloudImports())
         self.local=MagicMock();self.local.closed=False
         self.local.translate.return_value=dict(text='Beni takip et!',complete=True,processing_ms=1)
-        self.local_factory=self.stack.enter_context(patch('app.WarmNMTClient',return_value=self.local))
-        self.stack.enter_context(patch('app.model_manifest',return_value=(self.folder,{})))
-        self.root=tk.Tk();self.w=app.MainWindow(self.root)
+        self.local_factory=self.stack.enter_context(patch('ediz_game_translator.app.WarmNMTClient',return_value=self.local))
+        self.stack.enter_context(patch('ediz_game_translator.app.model_manifest',return_value=(self.folder,{})))
+        import customtkinter as ctk
+        self.root=ctk.CTk();self.w=app.MainWindow(self.root)
         config={'name':'Test','virtual-camera':{'type2':2,'source':'Raw'},
                 'sources':[{'name':'Raw','id':'dshow_input','settings':{'video_device_id':'raw-card'},'filters':[]}]}
         self.config=self.folder/'collection.json';self.config.write_text(json.dumps(config))
@@ -196,21 +201,21 @@ class DailyGuiTests(unittest.TestCase):
         self.assertEqual(self.cloud_guard.attempts,[])
         self.assertEqual(self.w.overlay_state.current(),'')
 
-    def test_two_pages_and_game_rename_save_restore_without_secret_writes(self):
-        self.assertEqual(set(self.w.pages),{'Ana Sayfa','Ayarlar'})
+    def test_five_pages_and_game_rename_save_restore_without_secret_writes(self):
+        self.assertEqual(set(self.w.pages),{'Canlı Çeviri','Altyazı Tasarımı','Oyun Profilleri','Bağlantılar','Tanılama'})
         self.assertFalse(self.w.advanced_open.get())
         self.w._change_game('Another Game')
         self.w._change_game('Renamed Game',rename=True)
         self.assertEqual(load_settings()['game'],'Renamed Game')
         self.secret_save.assert_not_called()
-        self.w.show_page('Ayarlar');self.root.update()
+        self.w.show_page('Bağlantılar');self.root.update()
         self.root.geometry('900x650');self.root.update()
-        self.assertTrue(self.w.pages['Ayarlar'].outer.winfo_viewable())
-        self.assertFalse(self.w.pages['Ana Sayfa'].outer.winfo_viewable())
+        self.assertTrue(self.w.pages['Bağlantılar'].outer.winfo_viewable())
+        self.assertFalse(self.w.pages['Canlı Çeviri'].outer.winfo_viewable())
 
     def test_game_save_failure_is_atomic_and_does_not_overwrite_profile(self):
         old=deepcopy(self.w.settings)
-        with patch('app.save_settings',side_effect=OSError('full')):
+        with patch('ediz_game_translator.app.save_settings',side_effect=OSError('full')):
             with self.assertRaises(OSError):self.w._change_game('New')
         self.assertEqual(self.w.settings,old)
         self.assertEqual(self.w.game.get(),old['game'])
@@ -263,20 +268,64 @@ class DailyGuiTests(unittest.TestCase):
         self.assertEqual(self.w.overlay_state.current(),'')
         self.assertEqual(self.w.last_translation_var.get(),'EXPIRED')
 
-    def test_translation_survives_old_five_second_policy_and_ocr_disappearance(self):
-        self.w.settings['translation_max_age']=.01
-        def response(source):
-            time.sleep(.08)
-            return dict(text='Late',complete=True,processing_ms=80)
-        self.local.translate.side_effect=response
-        self.w.start();self.wait(lambda:self.local.translate.call_count>0)
-        def saved():
-            with closing(sqlite3.connect(self.folder/'subtitles.sqlite3')) as db:
-                return db.execute('SELECT status FROM subtitles').fetchone()[0]=='translated'
-        self.wait(saved)
-        self.w.latest_seq+=1
-        self.w.post_session(self.w.session_id,'clear',self.w.latest_seq)
-        self.root.update()
-        self.assertEqual(self.w.overlay_state.current(),'Late')
+    def test_source_disappearance_removes_translation_but_preserves_history(self):
+        self.w.start();self.wait(lambda:self.w.overlay_state.current()=='Beni takip et!')
+        began=time.monotonic()
+        self.ocr.return_value=SimpleNamespace(txts=[],scores=[],boxes=None)
+        self.wait(lambda:self.w.overlay_state.current()=='',timeout=1)
+        self.assertLess(time.monotonic()-began,.6)
         with closing(sqlite3.connect(self.folder/'subtitles.sqlite3')) as db:
-            self.assertEqual(db.execute('SELECT status FROM subtitles').fetchone()[0],'translated')
+            self.assertEqual(db.execute('SELECT translated FROM translation_jobs').fetchone()[0],'Beni takip et!')
+
+    def test_late_result_after_source_disappearance_never_reappears(self):
+        entered=threading.Event();release=threading.Event()
+        def slow(source):
+            entered.set();release.wait(3)
+            return dict(text='Late',complete=True,processing_ms=1)
+        self.local.translate.side_effect=slow
+        self.w.start();self.wait(entered.is_set)
+        self.ocr.return_value=SimpleNamespace(txts=[],scores=[],boxes=None)
+        self.wait(lambda:self.w.subtitle_store.db.execute('SELECT active FROM live_sources').fetchone()[0]==0)
+        release.set()
+        self.wait(lambda:self.w.subtitle_store.db.execute('SELECT translation_state FROM translation_jobs').fetchone()[0]=='completed')
+        self.assertEqual(self.w.overlay_state.current(),'')
+
+    def test_game_style_save_is_separate_from_obs_credentials_and_resets_preview(self):
+        self.w.speaker_color.set('#FFD166');self.w.show_speaker.set(False)
+        self.w.save_subtitle_style();self.secret_save.assert_not_called()
+        self.w.show_speaker.set(True);self.w.reset_subtitle_style()
+        self.assertFalse(self.w.show_speaker.get())
+        self.assertEqual(self.w.overlay_state.snapshot()['style']['speaker_color'],'#FFD166')
+
+    def test_window_and_widget_scaling_125_and_150_preserve_primary_controls(self):
+        import customtkinter as ctk
+        try:
+            for scale in (1.25,1.5):
+                ctk.set_widget_scaling(scale);ctk.set_window_scaling(scale)
+                self.root.geometry('1100x620');self.w.show_page('Canlı Çeviri');self.root.update()
+                self.assertTrue(self.w.start_btn.winfo_viewable())
+                right=self.w.start_btn.winfo_rootx()+self.w.start_btn.winfo_width()
+                self.assertLessEqual(right,self.root.winfo_rootx()+self.root.winfo_width())
+                for page in self.w.pages:
+                    self.w.show_page(page);self.root.update()
+                    self.assertTrue(self.w.pages[page].outer.winfo_viewable())
+        finally:
+            ctk.set_widget_scaling(1);ctk.set_window_scaling(1)
+
+    def test_native_names_mask_and_resolution_scaling_use_shared_geometry(self):
+        from ediz_game_translator.subtitles.canvas_view import draw_captions
+        from ediz_game_translator.subtitles.layout import arrange_blocks
+        from ediz_game_translator.storage.subtitle_styles import DEFAULT_STYLE
+        c=self.w.style_canvas;style=dict(DEFAULT_STYLE)
+        sample=dict(id=1,text='Burada kal.',speaker='Scout',bounds=[.2,.8,.8,.9],source_size=[960,540])
+        blocks=arrange_blocks([sample],style);draw_captions(c,blocks,style,960,540)
+        self.assertEqual(c.itemcget(c.find_withtag('mask')[0],'fill'),'#000000')
+        self.assertEqual(c.itemcget(c.find_withtag('speaker')[0],'fill'),'#50E2BE')
+        self.assertEqual(c.itemcget(c.find_withtag('dialogue')[0],'fill'),'#FFFFFF')
+        small_font=c.itemcget(c.find_withtag('dialogue')[0],'font')
+        sample['source_size']=[1920,1080]
+        draw_captions(c,arrange_blocks([sample],style),style,960,540)
+        self.assertEqual(c.itemcget(c.find_withtag('dialogue')[0],'font'),small_font)
+        draw_captions(c,blocks,dict(style,show_speaker=False),960,540)
+        self.assertFalse(c.find_withtag('speaker'))
+        draw_captions(c,[],style,960,540);self.assertFalse(c.find_withtag('mask'))

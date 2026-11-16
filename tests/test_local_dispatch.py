@@ -1,12 +1,14 @@
+from bootstrap import configure_paths
+configure_paths()
 import threading
 import time
 import unittest
 from unittest.mock import MagicMock,patch
-from subtitle_store import SubtitleStore
-from subtitle_display import DisplayManager
-from translation_dispatch import LocalTranslationCoordinator
-from translation_memory import SafeTranslationMemory
-from light_translation import LocalEngineError,WarmNMTClient,validate_capacity
+from ediz_game_translator.storage.subtitle_store import SubtitleStore
+from ediz_game_translator.subtitles.subtitle_display import DisplayManager
+from ediz_game_translator.translation.translation_dispatch import LocalTranslationCoordinator
+from ediz_game_translator.translation.translation_memory import SafeTranslationMemory
+from ediz_game_translator.translation.light_translation import LocalEngineError,WarmNMTClient,validate_capacity
 
 
 class ConcurrentDispatchTests(unittest.TestCase):
@@ -82,9 +84,19 @@ class ConcurrentDispatchTests(unittest.TestCase):
         with self.assertRaises(ValueError):validate_capacity(2,2,'cuda')
         with self.assertRaises(ValueError):validate_capacity(99,1,'cpu')
         from cloud_guard import NoCloudImports
-        with NoCloudImports(),patch('light_translation.subprocess.Popen') as p:
+        with NoCloudImports(),patch('ediz_game_translator.translation.light_translation.subprocess.Popen') as p:
             with self.assertRaises(LocalEngineError):WarmNMTClient('unused','missing-model')
             p.assert_not_called()
+
+    def test_cancel_model_loading_terminates_child_without_waiting_for_load_timeout(self):
+        stop=threading.Event();released=threading.Event();process=MagicMock()
+        process.poll.return_value=None;process.terminate.side_effect=released.set
+        def reader(client):released.wait(2)
+        timer=threading.Timer(.05,stop.set);timer.start();began=time.monotonic()
+        with patch('ediz_game_translator.translation.light_translation.model_manifest'),patch('pathlib.Path.is_file',return_value=True),patch('ediz_game_translator.translation.light_translation.subprocess.Popen',return_value=process),patch.object(WarmNMTClient,'_read',reader):
+            with self.assertRaisesRegex(LocalEngineError,'kullanıcı'):WarmNMTClient('python','model',stop_event=stop)
+        timer.join();self.assertLess(time.monotonic()-began,.7);process.terminate.assert_called_once()
+
 
 
 class SafeMemoryTests(unittest.TestCase):

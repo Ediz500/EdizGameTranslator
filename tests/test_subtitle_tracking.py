@@ -1,4 +1,6 @@
 """Anonymized reproductions; original private game log is never checked in."""
+from bootstrap import configure_paths
+configure_paths()
 from contextlib import closing
 import json
 import math
@@ -9,11 +11,11 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
-from subtitle_tracking import ActiveSubtitles,Candidate,equivalent,continuation
-from dialogue_filter import dialogue_candidates
-from subtitle_store import SubtitleStore
-from capture_pipeline import CaptureRunner,DiagnosticLog
-from frame_sources import FramePacket
+from ediz_game_translator.capture.subtitle_tracking import ActiveSubtitles,Candidate,equivalent,continuation
+from ediz_game_translator.capture.dialogue_filter import dialogue_candidates
+from ediz_game_translator.storage.subtitle_store import SubtitleStore
+from ediz_game_translator.capture.capture_pipeline import CaptureRunner,DiagnosticLog
+from ediz_game_translator.capture.frame_sources import FramePacket
 
 
 def candidate(body,speaker='Voice-A',score=.99,box=(300,650,110,150)):
@@ -179,5 +181,5 @@ class StorageTests(unittest.TestCase):
             for i in range(3):count[0]=i;runner.step()
             self.assertEqual(change.call_count,3)
             self.assertEqual(dispatch.call_count,2)
-            self.assertTrue(all(len(__import__('subtitle_tracking').SPEAKER.findall(c.args[1]))==1 for c in dispatch.call_args_list))
+            self.assertTrue(all(len(__import__('ediz_game_translator.capture.subtitle_tracking',fromlist=['SPEAKER']).SPEAKER.findall(c.args[1]))==1 for c in dispatch.call_args_list))
             store.close()

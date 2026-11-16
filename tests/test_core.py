@@ -1,3 +1,5 @@
+from bootstrap import configure_paths
+configure_paths()
 import sys
 import tempfile
 import unittest
@@ -6,8 +8,8 @@ from types import SimpleNamespace
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from core import SubtitleTimeline, clean_ocr, choose_subtitle, key_for
-from overlay_server import SharedOverlayState, launch_server
+from ediz_game_translator.core import SubtitleTimeline, clean_ocr, choose_subtitle, key_for
+from ediz_game_translator.subtitles.overlay_server import SharedOverlayState, launch_server
 
 
 class CoreTests(unittest.TestCase):

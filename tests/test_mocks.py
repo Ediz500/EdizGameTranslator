@@ -1,3 +1,5 @@
+from bootstrap import configure_paths
+configure_paths()
 import base64
 import io
 import sys

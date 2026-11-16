@@ -1,4 +1,6 @@
 """Settings allowlist and malformed-file regressions."""
+from bootstrap import configure_paths
+configure_paths()
 import importlib.util
 import json
 from pathlib import Path
@@ -11,13 +13,13 @@ import unittest
 from unittest.mock import MagicMock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from core import load_settings, save_settings
+from ediz_game_translator.core import load_settings, save_settings
 
 
 class AuditTests(unittest.TestCase):
     def test_settings_exclude_runtime_credentials(self):
         with tempfile.TemporaryDirectory() as folder:
-            with patch('core.config_folder', return_value=Path(folder)):
+            with patch('ediz_game_translator.core.config_folder', return_value=Path(folder)):
                 save_settings({'game': 'Test', 'api_key_runtime': 'dummy',
                                'obs_password_runtime': 'dummy'})
                 saved = json.loads((Path(folder) / 'settings.json').read_text())
@@ -26,7 +28,7 @@ class AuditTests(unittest.TestCase):
     def test_valid_json_array_uses_defaults(self):
         with tempfile.TemporaryDirectory() as folder:
             (Path(folder) / 'settings.json').write_text('[]')
-            with patch('core.config_folder', return_value=Path(folder)):
+            with patch('ediz_game_translator.core.config_folder', return_value=Path(folder)):
                 self.assertEqual(load_settings()['obs_port'], 4455)
 
 

@@ -1,3 +1,5 @@
+from bootstrap import configure_paths
+configure_paths()
 from contextlib import ExitStack
 from pathlib import Path
 import sys
@@ -9,14 +11,14 @@ import unittest
 from unittest.mock import MagicMock,patch
 
 from PIL import Image
-from region_geometry import *
-from region_profiles import region_for,with_region,normalize_profiles,CROP_KEYS
-from frame_sources import FramePacket,LatestFrames
-from preview_service import SharedOCR
-from region_editor import RegionEditor,ocr_on_region
-from core import DEFAULTS,save_settings,load_settings
-from obs_capture import ObsSource
-from virtual_camera import CaptureConfigurationError
+from ediz_game_translator.capture.region_geometry import *
+from ediz_game_translator.storage.region_profiles import region_for,with_region,normalize_profiles,CROP_KEYS
+from ediz_game_translator.capture.frame_sources import FramePacket,LatestFrames
+from ediz_game_translator.capture.preview_service import SharedOCR
+from ediz_game_translator.ui.region_editor import RegionEditor,ocr_on_region
+from ediz_game_translator.core import DEFAULTS,save_settings,load_settings
+from ediz_game_translator.capture.obs_capture import ObsSource
+from ediz_game_translator.capture.virtual_camera import CaptureConfigurationError
 
 
 class GeometryTests(unittest.TestCase):
@@ -75,7 +77,7 @@ class ProfileTests(unittest.TestCase):
         first=with_region(original,'Game A',(.1,.2,.8,.9))
         second=with_region(first,'Game B',(.2,.3,.9,1))
         self.assertNotIn('game a',original['ocr_regions'])
-        with tempfile.TemporaryDirectory() as folder,patch('core.config_folder',return_value=Path(folder)):
+        with tempfile.TemporaryDirectory() as folder,patch('ediz_game_translator.core.config_folder',return_value=Path(folder)):
             save_settings(second);loaded=load_settings()
         self.assertEqual(region_for(loaded,'GAME A'),(.1,.2,.8,.9))
         self.assertEqual(region_for(loaded,'Game B'),(.2,.3,.9,1))
@@ -86,14 +88,14 @@ class ProfileTests(unittest.TestCase):
     def test_legacy_settings_and_corrupt_profiles_ignore_cloud_fields(self):
         s=dict(DEFAULTS);s.update(game='Legacy',crop_top=50,crop_bottom=90)
         self.assertEqual(region_for(s,'Legacy'),(0,.5,1,.9))
-        with tempfile.TemporaryDirectory() as folder,patch('core.config_folder',return_value=Path(folder)):
+        with tempfile.TemporaryDirectory() as folder,patch('ediz_game_translator.core.config_folder',return_value=Path(folder)):
             (Path(folder)/'settings.json').write_text('{"budget_try": 123, "ocr_regions": []}')
             loaded=load_settings()
         self.assertNotIn('budget_try',loaded)
         self.assertEqual(loaded['ocr_regions'],{})
 
     def test_no_hidden_credentials_and_failed_save_keeps_file(self):
-        with tempfile.TemporaryDirectory() as folder,patch('core.config_folder',return_value=Path(folder)):
+        with tempfile.TemporaryDirectory() as folder,patch('ediz_game_translator.core.config_folder',return_value=Path(folder)):
             save_settings({'game':'Original'})
             before=(Path(folder)/'settings.json').read_bytes()
             with self.assertRaises(ValueError):
@@ -200,23 +202,24 @@ class EditorWindowTests(unittest.TestCase):
 @unittest.skipUnless(sys.platform=='win32','Windows Tk only')
 class ControllerTests(unittest.TestCase):
     def setUp(self):
-        import app,tkinter as tk
+        from ediz_game_translator import app
+        import tkinter as tk
         self.app=app;self.stack=ExitStack();self.folder=self.stack.enter_context(tempfile.TemporaryDirectory())
-        for target in ('app.config_folder','core.config_folder'):
+        for target in ('ediz_game_translator.app.config_folder','ediz_game_translator.core.config_folder'):
             self.stack.enter_context(patch(target,return_value=Path(self.folder)))
-        self.stack.enter_context(patch('app.secret_get',return_value=''))
-        self.stack.enter_context(patch('app.secret_save'))
-        self.api=self.stack.enter_context(patch('app.WarmNMTClient'))
+        self.stack.enter_context(patch('ediz_game_translator.app.secret_get',return_value=''))
+        self.stack.enter_context(patch('ediz_game_translator.app.secret_save'))
+        self.api=self.stack.enter_context(patch('ediz_game_translator.app.WarmNMTClient'))
         self.obs=MagicMock();self.obs.frame.return_value=Image.new('RGB',(960,540),'#283038')
         def read():
             time.sleep(.015)
             self.obs.validate_raw_source('Raw input')
             return Image.new('RGB',(960,540),'#283038')
         self.obs.read.side_effect=read
-        self.stack.enter_context(patch('app.VirtualCamera',return_value=self.obs))
+        self.stack.enter_context(patch('ediz_game_translator.app.VirtualCamera',return_value=self.obs))
         self.source_factory=self.stack.enter_context(patch.object(app.MainWindow,'_obs',return_value=self.obs))
         self.engine=MagicMock(return_value=SimpleNamespace(txts=['Follow me!'],scores=[.99],boxes=None))
-        self.ocr_factory=self.stack.enter_context(patch('app.create_ocr',return_value=self.engine))
+        self.ocr_factory=self.stack.enter_context(patch('ediz_game_translator.app.create_ocr',return_value=self.engine))
         self.root=tk.Tk();self.main=app.MainWindow(self.root)
         self.main.game.set('Game A');self.main.source.set('Raw input')
         self.main.camera_config.set('mock-collection.json')
@@ -277,7 +280,7 @@ class ControllerTests(unittest.TestCase):
         self.main.open_region_editor();e=self.main.region_editor
         before=dict(self.main.settings)
         e.draft.change((.2,.4,.8,.9))
-        with patch('app.save_settings',side_effect=OSError('disk full')):e.save()
+        with patch('ediz_game_translator.app.save_settings',side_effect=OSError('disk full')):e.save()
         self.assertFalse(e.closed);self.assertEqual(self.main.settings,before)
         self.assertEqual(float(self.main.crop_vars['crop_top'].get()),65)
 

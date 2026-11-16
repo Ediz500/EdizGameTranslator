@@ -32,5 +32,8 @@
   "game": "Genel oyun",
   "lore": "",
   "show_desktop": true,
-  "transcript_srt": true
+  "transcript_srt": true,
+  "subtitle_profiles": {},
+  "live_debounce": 0.12,
+  "source_timeout": 0.6
 }

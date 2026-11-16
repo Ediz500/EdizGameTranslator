@@ -1,3 +1,5 @@
+from bootstrap import configure_paths
+configure_paths()
 import csv
 import hashlib
 import json
@@ -9,10 +11,10 @@ import time
 import unittest
 from unittest.mock import patch
 
-from local_translation import (LOCAL_MODELS,LocalWorkerClient,LocalWorkerError,
+from ediz_game_translator.translation.local_translation import (LOCAL_MODELS,LocalWorkerClient,LocalWorkerError,
     check_model_path,gemma_messages,milmmt_prompt,experimental_gemma_prompt)
-from local_benchmark import export_corpus,percentiles,quality_summary,QUALITY_FIELDS,review_sheet
-from subtitle_store import SubtitleStore
+from ediz_game_translator.benchmarks.local_benchmark import export_corpus,percentiles,quality_summary,QUALITY_FIELDS,review_sheet
+from ediz_game_translator.storage.subtitle_store import SubtitleStore
 
 
 class LocalBenchmarkTests(unittest.TestCase):
@@ -28,7 +30,7 @@ class LocalBenchmarkTests(unittest.TestCase):
         self.assertIn('PREVIOUS:',experimental_gemma_prompt('Wait.','Stay here.'))
 
     def test_pretrain_and_mismatched_manifest_rejected_before_launch(self):
-        with tempfile.TemporaryDirectory() as folder,patch('local_translation.subprocess.Popen') as popen:
+        with tempfile.TemporaryDirectory() as folder,patch('ediz_game_translator.translation.local_translation.subprocess.Popen') as popen:
             self.manifest(folder)
             with self.assertRaises(ValueError):check_model_path('MiLMMT-46-1B-Pretrain',folder)
             with self.assertRaises(ValueError):LocalWorkerClient(sys.executable,'translategemma-4b',folder)
@@ -40,7 +42,7 @@ class LocalBenchmarkTests(unittest.TestCase):
         def launch(command,**kwargs):
             launches.append((command,kwargs))
             return real_popen([sys.executable,'-u','-c',script],**kwargs)
-        with tempfile.TemporaryDirectory() as folder,patch('local_translation.subprocess.Popen',side_effect=launch):
+        with tempfile.TemporaryDirectory() as folder,patch('ediz_game_translator.translation.local_translation.subprocess.Popen',side_effect=launch):
             self.manifest(folder);client=LocalWorkerClient(sys.executable,'milmmt-1b',folder)
             try:
                 self.assertEqual(client.translate('Wait.')['text'],'Bekle.')
@@ -57,7 +59,7 @@ class LocalBenchmarkTests(unittest.TestCase):
         def launch(command,**kwargs):
             child=real_popen([sys.executable,'-u','-c','import time;time.sleep(30)'],**kwargs)
             children.append(child);return child
-        with tempfile.TemporaryDirectory() as folder,patch('local_translation.subprocess.Popen',side_effect=launch):
+        with tempfile.TemporaryDirectory() as folder,patch('ediz_game_translator.translation.local_translation.subprocess.Popen',side_effect=launch):
             self.manifest(folder)
             with self.assertRaises(LocalWorkerError):LocalWorkerClient(sys.executable,'milmmt-1b',folder,load_timeout=.1)
             self.assertIsNotNone(children[0].poll())
@@ -66,7 +68,7 @@ class LocalBenchmarkTests(unittest.TestCase):
         real_popen=subprocess.Popen
         script="import json;print(json.dumps({'error':'CUDA out of memory'}),flush=True)"
         def launch(command,**kwargs):return real_popen([sys.executable,'-u','-c',script],**kwargs)
-        with tempfile.TemporaryDirectory() as folder,patch('local_translation.subprocess.Popen',side_effect=launch):
+        with tempfile.TemporaryDirectory() as folder,patch('ediz_game_translator.translation.local_translation.subprocess.Popen',side_effect=launch):
             self.manifest(folder)
             with self.assertRaisesRegex(LocalWorkerError,'CUDA out of memory'):LocalWorkerClient(sys.executable,'milmmt-1b',folder)
 

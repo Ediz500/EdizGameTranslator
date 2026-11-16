@@ -1,4 +1,6 @@
 """Preserved migration, HTTP acknowledgements and lifecycle regressions."""
+from bootstrap import configure_paths
+configure_paths()
 from copy import deepcopy
 import json
 from pathlib import Path
@@ -9,8 +11,8 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import MagicMock,patch
 
-from subtitle_store import SubtitleStore
-from overlay_server import SharedOverlayState,launch_server
+from ediz_game_translator.storage.subtitle_store import SubtitleStore
+from ediz_game_translator.subtitles.overlay_server import SharedOverlayState,launch_server
 
 
 class StoreAndProtocolTests(unittest.TestCase):

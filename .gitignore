@@ -65,6 +65,8 @@ obs_config.json
 *.srt
 *.jsonl
 diagnostics/
+!src/ediz_game_translator/diagnostics/
+!src/ediz_game_translator/diagnostics/*.py
 logs/
 benchmark-private/
 last_ocr_crop.png
@@ -110,3 +112,6 @@ Desktop.ini
 .idea/
 .vscode/
 *.swp
+
+# Private local organization / developer profiles
+local-data/
