@@ -75,7 +75,8 @@ class DesktopOverlay:
         from ediz_game_translator.subtitles.canvas_view import draw_captions
         from ediz_game_translator.storage.subtitle_styles import DEFAULT_STYLE
         style=style or dict(DEFAULT_STYLE,font_size=self.font)
-        signature=repr((blocks,style,self.width,self.height))
+        from ediz_game_translator.subtitles.layout import visual_signature
+        signature=repr((visual_signature(blocks),style,self.width,self.height))
         if not self.enabled or self._previous == signature:return
         self._previous=signature
         draw_captions(self.canvas,blocks,style,self.width,self.height)

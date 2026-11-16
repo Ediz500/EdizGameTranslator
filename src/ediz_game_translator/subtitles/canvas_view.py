@@ -13,6 +13,24 @@ def draw_captions(canvas,blocks,style=None,width=None,height=None):
         k=contain(width,height,*source)[2]/1920
         pad=max(3,18*k);available=max(4,r-l-2*pad);h=bottom-t
         canvas.create_rectangle(l,t,r,bottom,fill='#000000',outline='',tags=('caption','mask'))
+        if 'body_rect' in b:
+            size=max(1,round(b['visual_font_size']*k))
+            align=style['alignment'];anchor={'left':'nw','center':'n','right':'ne'}[align]
+            def text_at(rect,lines,pixels,color,tag):
+                x0,y0,x1,y1=viewport_rect(rect,width,height,source)
+                x={'left':x0,'center':(x0+x1)/2,'right':x1}[align]
+                # Explicit measured lines: Tk must not invent a different wrap.
+                line_height=max(1,round(pixels*1.28))
+                for line_no,line in enumerate(lines):
+                    self_tag=f'caption_text_{i}'
+                    canvas.create_text(x,y0+line_no*line_height,anchor=anchor,text=line,
+                        font=('Segoe UI',-pixels,'bold'),fill=color,justify=align,
+                        tags=('caption',self_tag,tag))
+            text_at(b['body_rect'],b['display_lines'],size,'#FFFFFF','dialogue')
+            if style['show_speaker'] and b.get('speaker'):
+                name_size=max(1,round(max(6,round(b['visual_font_size']*.7))*k))
+                text_at(b['name_rect'],b['name_lines'],name_size,style['speaker_color'],'speaker')
+            continue
         name=b.get('speaker','') if style['show_speaker'] else ''
         size=max(8,round(style['font_size']*k*b.get('font_scale',1)))
         align=style['alignment'];anchor={'left':'nw','center':'n','right':'ne'}[align]

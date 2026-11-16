@@ -18,13 +18,31 @@ function clearView(){
  for(const n of nodes.values())n.remove();nodes.clear();
 }
 function position(node,b,s){
+ const signature=JSON.stringify([innerWidth,innerHeight,b.id,b.text,b.speaker,b.mask_rect,
+  b.body_rect,b.name_rect,b.display_lines,b.name_lines,b.visual_font_size,b.font_scale,b.source_size,s]);
+ if(node.visualSignature===signature)return;node.visualSignature=signature;
  const [sw,sh]=b.source_size||[1920,1080],k=Math.min(innerWidth/sw,innerHeight/sh),
  ox=(innerWidth-sw*k)/2,oy=(innerHeight-sh*k)/2,r=b.mask_rect;
  Object.assign(node.style,{left:(ox+r[0]*sw*k)+'px',top:(oy+r[1]*sh*k)+'px',
  width:((r[2]-r[0])*sw*k)+'px',height:((r[3]-r[1])*sh*k)+'px',
  padding:(8*k*sw/1920)+'px '+(18*k*sw/1920)+'px',
  textAlign:s.alignment,fontSize:(s.font_size*k*sw/1920*(b.font_scale||1))+'px'});
- const name=node.firstChild;name.textContent=s.show_speaker&&b.speaker?b.speaker:'';
+ const name=node.firstChild,body=node.lastChild;
+ if(b.body_rect){
+  const scale=k*sw/1920,font=b.visual_font_size*scale;
+  node.style.padding='0px';node.style.fontSize=font+'px';
+  function place(child,rect,lines,size){
+   Object.assign(child.style,{position:'absolute',left:((rect[0]-r[0])*sw*k)+'px',
+    top:((rect[1]-r[1])*sh*k)+'px',width:((rect[2]-rect[0])*sw*k)+'px',
+    height:'auto',whiteSpace:'pre',overflowWrap:'normal',fontSize:size+'px',fontWeight:'700',lineHeight:'1.28'});
+   child.textContent=lines.join('\n');
+  }
+  place(body,b.body_rect,b.display_lines,font);
+  place(name,b.name_rect,b.name_lines,Math.max(6,Math.round(b.visual_font_size*.7))*scale);
+  name.style.display=s.show_speaker&&b.speaker?'block':'none';name.style.color=s.speaker_color;return;
+ }
+ for(const child of [name,body])Object.assign(child.style,{position:'static',width:'auto',height:'auto',whiteSpace:'pre-wrap',overflowWrap:'anywhere',fontSize:child===name?'.7em':'1em',fontWeight:'600'});
+ name.textContent=s.show_speaker&&b.speaker?b.speaker:'';
  name.style.display=name.textContent?'block':'none';name.style.color=s.speaker_color;
  node.lastChild.textContent=b.text;
  let size=parseFloat(node.style.fontSize);

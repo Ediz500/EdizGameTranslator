@@ -6,6 +6,7 @@ class Element{
  constructor(){this.style={};this.children=[];this.textContent='';this.clientHeight=100;this.scrollHeight=0;this.clientWidth=100;this.scrollWidth=0}
  append(...nodes){for(const n of nodes){n.parent=this;this.children.push(n)}}
  remove(){if(this.parent)this.parent.children=this.parent.children.filter(n=>n!==this)}
+ set textContent(value){this._text=value;this.writes=(this.writes||0)+1}get textContent(){return this._text}
  get firstChild(){return this.children[0]}get lastChild(){return this.children.at(-1)}
 }
 function fixture(generation,id,text){return {generation,style:{font_size:36,alignment:'center',show_speaker:true,speaker_color:'#50E2BE'},blocks:id===null?[]:[{id,text,speaker:'Scout',mask_rect:[.1,.7,.9,.9],source_size:[1920,1080]}]}}
@@ -41,9 +42,33 @@ async function harness(sse,frameMs=16){
  async function reply(index,data,status=200){requests[index].resolve({ok:status>=200&&status<300,json:async()=>data});await flush()}
  async function reject(index){requests[index].reject(new Error('Connection lost'));await flush()}
  function texts(){return body.children.map(n=>n.lastChild.textContent)}
- return {advance,reply,reject,requests,streams,acks,texts,body,listeners,flush};
+ return {advance,reply,reject,requests,streams,acks,texts,body,listeners,flush,context};
 }
 const cases={
+ async measured_visual_geometry_resizes_without_rewrapping_and_expires(){
+  const h=await harness(true),data=fixture('s',1,'İki satırlı metin.');
+  Object.assign(data.blocks[0],{mask_rect:[.4,.7,.6,.9],body_rect:[.42,.8,.58,.85],name_rect:[.42,.75,.58,.79],visual_font_size:36,display_lines:['İki satırlı','metin.'],name_lines:['Scout']});
+  h.streams[0].emit(data);const node=h.body.children[0],text=node.lastChild;
+  assert.equal(text.textContent,'İki satırlı\nmetin.');assert.equal(text.style.fontSize,'36px');
+  h.context.innerWidth=1280;h.context.innerHeight=720;h.listeners.resize();
+  assert.equal(text.style.fontSize,'24px');assert.equal(text.textContent,'İki satırlı\nmetin.');
+  assert.ok(Math.abs(parseFloat(node.style.width)-256)<.01);
+  await h.advance(1600);assert.equal(h.body.children.length,0);h.listeners.resize();assert.equal(h.body.children.length,0);
+ },
+ async switching_to_fixed_restores_legacy_flow_styles(){
+  const h=await harness(true),data=fixture('s',1,'A');
+  Object.assign(data.blocks[0],{body_rect:[.2,.7,.8,.85],name_rect:[.2,.6,.8,.7],visual_font_size:36,display_lines:['A'],name_lines:['Scout']});
+  h.streams[0].emit(data);h.streams[0].emit(fixture('s',1,'B'));
+  const text=h.body.children[0].lastChild;assert.equal(text.style.position,'static');
+  assert.equal(text.style.whiteSpace,'pre-wrap');assert.equal(text.style.overflowWrap,'anywhere');assert.equal(text.textContent,'B');
+ },
+ async unchanged_geometry_does_not_rewrite_dom_on_ocr_noise(){
+  const h=await harness(true),data=fixture('s',1,'A');
+  Object.assign(data.blocks[0],{body_rect:[.2,.7,.8,.85],name_rect:[.2,.6,.8,.7],visual_font_size:36,display_lines:['A'],name_lines:['Scout']});
+  h.streams[0].emit(data);const text=h.body.children[0].lastChild,writes=text.writes;
+  for(let i=0;i<10;i++){data.blocks[0].bounds=[.2,.7+i*.0001,.8,.9];h.streams[0].emit(data)}
+  assert.equal(text.writes,writes);assert.deepEqual(h.texts(),['A']);
+ },
  async polling_error_clears_and_recovers(){
   const h=await harness(false);await h.reply(0,fixture('s',1,'A'));assert.deepEqual(h.texts(),['A']);
   await h.advance(100);await h.reject(1);await h.advance(1600);assert.deepEqual(h.texts(),[]);

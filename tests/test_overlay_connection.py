@@ -15,6 +15,9 @@ class OverlayConnectionTests(unittest.TestCase):
             input=OVERLAY_HTML,text=True,encoding='utf8',capture_output=True,timeout=15)
         self.assertEqual(result.returncode,0,result.stdout+result.stderr)
 
+    def test_measured_visual_geometry_resizes_without_rewrapping_and_expires(self):self.run_case('measured_visual_geometry_resizes_without_rewrapping_and_expires')
+    def test_switching_to_fixed_restores_legacy_flow_styles(self):self.run_case('switching_to_fixed_restores_legacy_flow_styles')
+    def test_unchanged_geometry_does_not_rewrite_dom_on_ocr_noise(self):self.run_case('unchanged_geometry_does_not_rewrite_dom_on_ocr_noise')
     def test_polling_error_clears_and_recovers(self):self.run_case('polling_error_clears_and_recovers')
     def test_hung_poll_has_deadline_and_retries(self):self.run_case('hung_poll_has_deadline_and_retries')
     def test_silent_sse_expires_and_falls_back(self):self.run_case('silent_sse_expires_and_falls_back')
