@@ -107,6 +107,29 @@ class LiveSyncTests(unittest.TestCase):
         state.bind(self.store,'s',live=True)
         self.assertFalse(state.set('Yanlış örnek.'));state.clear();state.close()
 
+    def test_mask_survives_one_blank_but_confirmed_gap_removes_both(self):
+        a=self.source('Scout: Stay close.','Scout',[.2,.8,.8,.9]);self.observe(a);j=self.job(a,'Yakında kal.')
+        self.now[0]=10.04;self.observe()
+        blocks=arrange_blocks(self.manager.snapshot()['blocks'],DEFAULT_STYLE)
+        self.assertEqual([b['id'] for b in blocks],[j]);self.assertIn('mask_rect',blocks[0])
+        self.now[0]=10.08;self.observe(a);self.assertEqual(self.texts(),['Yakında kal.'])
+        self.now[0]=10.12;self.observe();self.now[0]=10.18;self.observe();self.now[0]=10.25
+        self.assertEqual(arrange_blocks(self.manager.snapshot()['blocks'],DEFAULT_STYLE),[])
+
+    def test_single_slow_blank_can_hit_independent_ocr_stale_limit(self):
+        a=self.source('The source.');self.observe(a);self.job(a,'Çeviri.')
+        self.now[0]=10.55;self.observe();self.assertEqual(self.texts(),['Çeviri.'])
+        self.now[0]=10.61
+        self.assertEqual(arrange_blocks(self.manager.snapshot()['blocks'],DEFAULT_STYLE),[])
+        self.assertEqual(self.store.db.execute('SELECT reason FROM live_sources').fetchone()[0],'ocr_stale')
+
+    def test_fast_A_to_B_has_neither_old_text_nor_mask_while_B_is_pending(self):
+        a=self.source('First source.',bounds=[.2,.8,.8,.9]);self.observe(a);self.job(a,'Eski A.')
+        self.now[0]=10.04;b=self.source('Next source.',bounds=[.2,.8,.8,.9]);self.observe(b,retired=[a['track_key']])
+        self.assertEqual(arrange_blocks(self.manager.snapshot()['blocks'],DEFAULT_STYLE),[])
+        self.job(b,'Yeni B.');blocks=arrange_blocks(self.manager.snapshot()['blocks'],DEFAULT_STYLE)
+        self.assertEqual([x['text'] for x in blocks],['Yeni B.']);self.assertIn('mask_rect',blocks[0])
+
 
 class LivePipelineTests(unittest.TestCase):
     def test_actual_filter_pipeline_preserves_A_B_A_and_different_speakers(self):

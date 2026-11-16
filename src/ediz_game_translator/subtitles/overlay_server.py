@@ -129,11 +129,10 @@ def launch_server(state: SharedOverlayState, port: int = 8788):
                         body=state.json();data=json.loads(body)
                         signature=(data['generation'],json.dumps(data['style'],sort_keys=True),
                             tuple((b['id'],b['text'],b['speaker'],tuple(b['mask_rect']),tuple(b.get('source_size',(1920,1080)))) for b in data['blocks']))
-                        if signature!=last:
+                        # Full snapshots also act as JS-visible liveness heartbeats.
+                        if signature!=last or time.monotonic()-heartbeat>=.5:
                             self.wfile.write(b'data: '+body+b'\n\n');self.wfile.flush()
                             state.record_sent(data,'sse');last=signature;heartbeat=time.monotonic()
-                        elif time.monotonic()-heartbeat>10:
-                            self.wfile.write(b': keepalive\n\n');self.wfile.flush();heartbeat=time.monotonic()
                         state.wait_for_event()
                 except (OSError,ConnectionError):pass
                 finally:self.server.stream_slots.release()

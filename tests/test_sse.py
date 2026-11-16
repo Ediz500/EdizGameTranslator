@@ -45,3 +45,34 @@ class SSETests(unittest.TestCase):
             with urlopen(f'http://127.0.0.1:{server.server_port}/overlay') as r:
                 self.assertIn('const USE_SSE=false;',r.read().decode())
         finally:server.shutdown();server.server_close();state.close()
+
+    def test_unchanged_snapshot_is_a_js_visible_heartbeat(self):
+        state=SharedOverlayState();state.set('Sabit sentetik replik.',10);server=launch_server(state,0)
+        try:
+            with urlopen(f'http://127.0.0.1:{server.server_port}/events',timeout=1.4) as stream:
+                first=json.loads(stream.readline()[6:]);stream.readline();began=time.monotonic()
+                second=stream.readline();self.assertTrue(second.startswith(b'data: '))
+                data=json.loads(second[6:]);self.assertEqual(data['generation'],first['generation'])
+                self.assertEqual(data['blocks'],first['blocks']);self.assertLess(time.monotonic()-began,1.2)
+        finally:server.shutdown();server.server_close();state.close()
+
+    def test_new_stream_gets_only_current_state_after_source_replacement(self):
+        from ediz_game_translator.storage.subtitle_store import SubtitleStore
+        store=SubtitleStore(':memory:');state=SharedOverlayState();state.bind(store,'s',live=True)
+        store.enable_live_session('s',stale=2);now=time.monotonic()
+        def entry(text,key):
+            row=store.accept('s',text,now,now,0,now,.99,'fixture')
+            return dict(subtitle_id=row,track_key=key,canonical=text,speaker='')
+        a=entry('First source.','A');store.publish_sources('s',[a],now)
+        old=store.enqueue_translation('s',a['subtitle_id'],a['canonical'],'local:fixture',now)
+        store.claim_translation('s',now)
+        b=entry('Current source.','B');store.publish_sources('s',[b],now,retired=['A'])
+        job=store.enqueue_translation('s',b['subtitle_id'],b['canonical'],'local:fixture',now)
+        store.complete_translation(job,'Güncel B.',now);store.complete_translation(old,'Eski A.',now)
+        server=launch_server(state,0)
+        try:
+            with urlopen(f'http://127.0.0.1:{server.server_port}/events',timeout=2) as stream:
+                data=json.loads(stream.readline()[6:])
+                self.assertEqual([b['text'] for b in data['blocks']],['Güncel B.'])
+                self.assertEqual(store.db.execute('SELECT translated FROM translation_jobs WHERE id=?',(old,)).fetchone()[0],'Eski A.')
+        finally:server.shutdown();server.server_close();state.close();store.close()

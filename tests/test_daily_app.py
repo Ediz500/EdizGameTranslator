@@ -133,6 +133,8 @@ class DailyGuiTests(unittest.TestCase):
         self.local_factory=self.stack.enter_context(patch('ediz_game_translator.app.WarmNMTClient',return_value=self.local))
         self.stack.enter_context(patch('ediz_game_translator.app.model_manifest',return_value=(self.folder,{})))
         import customtkinter as ctk
+        from ediz_game_translator.subtitles.overlay_server import launch_server
+        self.stack.enter_context(patch('ediz_game_translator.app.launch_server',side_effect=lambda state:launch_server(state,0)))
         self.root=ctk.CTk();self.w=app.MainWindow(self.root)
         config={'name':'Test','virtual-camera':{'type2':2,'source':'Raw'},
                 'sources':[{'name':'Raw','id':'dshow_input','settings':{'video_device_id':'raw-card'},'filters':[]}]}
@@ -153,7 +155,7 @@ class DailyGuiTests(unittest.TestCase):
         self.w.start()
         self.wait(lambda:self.w.overlay_state.current()=='Beni takip et!')
         self.assertTrue(self.w.running);self.assertEqual(self.w.start_btn['text'],'■  DURDUR')
-        with urlopen('http://127.0.0.1:8788/state',timeout=2) as r:
+        with urlopen(f'http://127.0.0.1:{self.w.server.server_port}/state',timeout=2) as r:
             self.assertEqual(json.load(r)['text'],'Beni takip et!')
         self.assertEqual(self.local.translate.call_count,1)
         self.assertEqual(self.cloud_guard.attempts,[])
