@@ -71,23 +71,14 @@ class DesktopOverlay:
     def render(self, text: str):
         self.render_blocks([dict(text=text,speaker='')] if text else [])
 
-    def render_blocks(self,blocks):
-        signature=tuple((b.get('id'),b['text'],b.get('speaker','')) for b in blocks)
-        if not self.enabled or self._previous == signature:
-            return
-        self._previous = signature
-        self.canvas.delete("all")
-        width = int(self.width * .82)
-        x = self.width // 2
-        y = int(self.height * (1 - self.bottom / 100))
-        for i,b in reversed(list(enumerate(blocks))):
-            text=(b.get('speaker','')+':\n' if b.get('speaker') else '')+b['text']
-            tag='txt'+str(i)
-            self.canvas.create_text(x,y,anchor='s',text=text,font=('Segoe UI',self.font,'bold'),fill='white',justify='center',width=width,tags=tag)
-            bbox=self.canvas.bbox(tag)
-            if bbox:
-                rect=self.canvas.create_rectangle(bbox[0]-20,bbox[1]-10,bbox[2]+20,bbox[3]+10,fill='#101622',outline='#101622')
-                self.canvas.tag_lower(rect);y=bbox[1]-30
+    def render_blocks(self,blocks,style=None):
+        from ediz_game_translator.subtitles.canvas_view import draw_captions
+        from ediz_game_translator.storage.subtitle_styles import DEFAULT_STYLE
+        style=style or dict(DEFAULT_STYLE,font_size=self.font)
+        signature=repr((blocks,style,self.width,self.height))
+        if not self.enabled or self._previous == signature:return
+        self._previous=signature
+        draw_captions(self.canvas,blocks,style,self.width,self.height)
 
     def hide(self):
         self.enabled = False

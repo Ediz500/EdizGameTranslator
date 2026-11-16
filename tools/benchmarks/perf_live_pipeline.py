@@ -37,7 +37,7 @@ def run(args):
     video_before=video_settings(metadata)
     def factory():
         obs=ObsSource(secret_get('obs_password'),s['obs_port'],width=args.width)
-        if args.method=='ediz_game_translator.capture.virtual_camera':
+        if args.method=='virtual_camera':
             try:
                 return VirtualCamera(args.config,s['obs_source'],args.width,True,LiveObsGuard(obs))
             except Exception:
@@ -51,7 +51,7 @@ def run(args):
     with tempfile.TemporaryDirectory() as folder:
         store=SubtitleStore(Path(folder)/'benchmark.sqlite3')
         try:
-            buffered=LatestFrames(factory,stop,period=0 if args.method=='ediz_game_translator.capture.virtual_camera' else .15)
+            buffered=LatestFrames(factory,stop,period=0 if args.method=='virtual_camera' else .15)
             runner=CaptureRunner(buffered.read,
                 lambda img:crop_frame(img,*[s[k] for k in ('crop_left','crop_top','crop_right','crop_bottom')]),
                 ocr,store,'live-benchmark',DiagnosticLog(),lambda:None,lambda *a:None,.28)
@@ -82,13 +82,13 @@ def run(args):
 if __name__=='__main__':
     sys.stdout.reconfigure(encoding='utf-8')
     p=argparse.ArgumentParser()
-    p.add_argument('--method',choices=('websocket','ediz_game_translator.capture.virtual_camera'),default='websocket')
+    p.add_argument('--method',choices=('websocket','virtual_camera'),default='websocket')
     p.add_argument('--width',type=int,choices=(960,1280,1920),default=960)
     p.add_argument('--seconds',type=int,default=20)
     p.add_argument('--profile',default='bounded960')
     p.add_argument('--config')
     p.add_argument('--output',default='PERF_LIVE_PIPELINE.json')
     a=p.parse_args()
-    if a.method=='ediz_game_translator.capture.virtual_camera' and not a.config:p.error('--config required')
+    if a.method=='virtual_camera' and not a.config:p.error('--config required')
     if not 1<=a.seconds<=600:p.error('seconds must be 1..600')
     run(a)

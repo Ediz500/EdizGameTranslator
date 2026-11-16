@@ -88,6 +88,16 @@ class ConcurrentDispatchTests(unittest.TestCase):
             with self.assertRaises(LocalEngineError):WarmNMTClient('unused','missing-model')
             p.assert_not_called()
 
+    def test_cancel_model_loading_terminates_child_without_waiting_for_load_timeout(self):
+        stop=threading.Event();released=threading.Event();process=MagicMock()
+        process.poll.return_value=None;process.terminate.side_effect=released.set
+        def reader(client):released.wait(2)
+        timer=threading.Timer(.05,stop.set);timer.start();began=time.monotonic()
+        with patch('ediz_game_translator.translation.light_translation.model_manifest'),patch('pathlib.Path.is_file',return_value=True),patch('ediz_game_translator.translation.light_translation.subprocess.Popen',return_value=process),patch.object(WarmNMTClient,'_read',reader):
+            with self.assertRaisesRegex(LocalEngineError,'kullanıcı'):WarmNMTClient('python','model',stop_event=stop)
+        timer.join();self.assertLess(time.monotonic()-began,.7);process.terminate.assert_called_once()
+
+
 
 class SafeMemoryTests(unittest.TestCase):
     def test_short_lines_never_automatically_cached(self):

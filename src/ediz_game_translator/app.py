@@ -119,7 +119,7 @@ class MainWindow:
 
     def save_preferences(self):
         if self.prepare(require_source=False):
-            self.status_var.set('Ayarlar kaydedildi. Görüntü ayarları sonraki başlangıçta uygulanır.')
+            self.status_var.set('Ayarlar kaydedildi.')
 
 
     def _change_game(self,new_name,rename=False):
@@ -136,6 +136,7 @@ class MainWindow:
         self.settings=updated
         self.game_combo['values']=game_names(updated)
         self.game.set(updated['game'])
+        if hasattr(self,'refresh_profiles'):self.refresh_profiles()
 
     def add_game(self):
         name=simpledialog.askstring('Yeni oyun','Oyun adı:',parent=self.root)
@@ -151,10 +152,14 @@ class MainWindow:
 
     def _load_game_region(self,*_):
         if not self.game.get().strip():return
+        active=getattr(self,'active_capture_settings',None)
+        if self.running and active and self.game.get()!=active['game']:
+            self.game.set(active['game']);self.status_var.set('Profil değiştirmeden önce oturumu durdurun.');return
         try:rect=region_for(self.settings,self.game.get())
         except ValueError:rect=DEFAULT_REGION
         for key,value in zip(CROP_KEYS,rect):self.crop_vars[key].set(str(value*100))
         self._region_summary()
+        if hasattr(self,'load_subtitle_style'):self.load_subtitle_style()
 
     def _region_summary(self):
         values=[float(self.crop_vars[k].get()) for k in CROP_KEYS]
@@ -217,7 +222,7 @@ class MainWindow:
             owned_stop=None
             if not self.running:
                 s=dict(obs_port=int(self.obs_port.get()),obs_source=self.source.get().strip(),
-                    obs_password_runtime=self.obs_password.get(),capture_method='ediz_game_translator.capture.virtual_camera',
+                    obs_password_runtime=self.obs_password.get(),capture_method='virtual_camera',
                     capture_width=int(self.capture_width.get()),ocr_profile=self.ocr_profile.get(),
                     camera_config=self.camera_config.get(),_diagnostic=True)
                 if not s['obs_source']:raise ValueError('Önce ham oyun kaynağını seç.')
@@ -248,6 +253,34 @@ class MainWindow:
             if self.preview_stop is not None:self.preview_stop.set()
             self.preview_active=False
             self.status_var.set('OCR düzenleyici: '+str(exc))
+
+    def save_subtitle_style(self):
+        from ediz_game_translator.storage.subtitle_styles import with_style
+        try:
+            style=self.subtitle_style_from_ui()
+            updated=with_style(self.settings,self.game.get(),style)
+            save_settings(updated);self.settings=updated
+            self.overlay_state.configure_style(style)
+            self.refresh_design();self.status_var.set('Altyazı görünümü seçili oyuna kaydedildi.')
+        except (ValueError,OSError) as exc:messagebox.showerror('Altyazı görünümü',str(exc))
+
+    def reset_subtitle_style(self):
+        self.load_subtitle_style()
+
+    def _refresh_diagnostics(self):
+        store=self.subtitle_store;active=getattr(self,'active_capture_settings',None)
+        if store is None or not active:return
+        import json
+        with store.lock:
+            timing=store.db.execute('SELECT t.metrics FROM translation_timings t JOIN translation_jobs j ON j.id=t.job_id WHERE j.session=? ORDER BY j.id DESC LIMIT 1',(active['_capture_session'],)).fetchone()
+            render=store.db.execute('SELECT (a.seen_mono-j.overlay_sent_mono)*1000 FROM render_acks a JOIN translation_jobs j ON j.id=a.job_id WHERE j.session=? AND j.overlay_sent_mono IS NOT NULL ORDER BY a.seen_mono DESC LIMIT 1',(active['_capture_session'],)).fetchone()
+        if timing:
+            data=json.loads(timing[0])
+            for key,field in [('translation','processing_ms'),('capacity','capacity_wait_ms')]:
+                if field in data:self.metric_vars[key].set(f'{data[field]:.1f} ms')
+        if render:self.metric_vars['renderer'].set(f'{max(0,render[0]):.1f} ms')
+        removals=store.removal_latencies(active['_capture_session'])
+        if removals:self.metric_vars['removal'].set(f"{removals[-1]['ms']:.1f} ms")
 
     def _choose_camera_config(self):
         selected=filedialog.askopenfilename(title='OBS Source sanal kamera ayarını içeren koleksiyon',filetypes=[('OBS collection','*.json')])
@@ -297,7 +330,7 @@ class MainWindow:
                  show_desktop=bool(self.show_desktop.get()),
                  font_size=int(self.font_var.get()),
                  overlay_bottom=int(self.bottom_var.get()))
-        s.update(capture_method='ediz_game_translator.capture.virtual_camera',capture_width=int(self.capture_width.get()),
+        s.update(capture_method='virtual_camera',capture_width=int(self.capture_width.get()),
                  ocr_profile=self.ocr_profile.get(),camera_config=self.camera_config.get())
         s.update(translation_engine=self.local_engine.get(),local_python=self.local_python.get().strip() or
                  (sys.executable if not getattr(sys,'frozen',False) else ''),
@@ -318,6 +351,8 @@ class MainWindow:
             raise ValueError("Yazı boyu 12–96, alttan mesafe %1–40 olmalı.")
         from PIL import Image
         crop_frame(Image.new("RGB", (200, 200)), s["crop_left"], s["crop_top"], s["crop_right"], s["crop_bottom"])
+        from ediz_game_translator.storage.subtitle_styles import with_style
+        s=with_style(s,s['game'],self.subtitle_style_from_ui())
         return s
 
     def prepare(self, require_source=True):
@@ -327,13 +362,15 @@ class MainWindow:
             s = self._settings_from_ui()
             if require_source and not s["obs_source"]:
                 raise ValueError("Önce OBS oyun kaynağını seç.")
-            secret_save("obs_password", self.obs_password.get())
+            if self.obs_password.get()!=secret_get("obs_password"):
+                secret_save("obs_password", self.obs_password.get())
             save_settings(s)
             self.settings = dict(s)
             # Runtime-only credentials; save_settings has a strict allowlist.
             s["obs_password_runtime"] = self.obs_password.get()
             self.overlay_state.font = s["font_size"]
             self.overlay_state.bottom = s["overlay_bottom"]
+            self.overlay_state.configure_style(self.subtitle_style_from_ui())
             return s
         except Exception as exc:
             messagebox.showerror("Ayarları kontrol et", str(exc))
@@ -464,8 +501,11 @@ class MainWindow:
         self.stop_evt = threading.Event()
         self.session_id += 1
         session_id = self.session_id
-        self.overlay_state.bind(self.subtitle_store,s['_capture_session'],ready_first=True)
+        self.overlay_state.bind(self.subtitle_store,s['_capture_session'],live=True)
         self.shown_ids=set()
+        self.visible_history={}
+        self.native_ids=set()
+        for var in self.metric_vars.values():var.set("—")
         self.metrics_saved_session=None
         self.latest_seq = self.seq = 0
         self.timeline = SubtitleTimeline()
@@ -522,10 +562,13 @@ class MainWindow:
                 ocr, store, s['_capture_session'], diagnostic, change, accept,
                 s.get('fixed_ocr_interval',.04),
                 ImageChangeGate(s.get('change_check_interval',.02),s.get('full_ocr_interval',.15))
-                    if s.get('capture_schedule')=='adaptive' else None)
+                    if s.get('capture_schedule')=='adaptive' else None,live=True,
+                debounce=s.get('live_debounce',.12),stale=s.get('source_timeout',.6),
+                crop_rect=tuple(s[k]/100 for k in CROP_KEYS),
+                on_metrics=lambda data:self.post_session(session_id,'ocr_metrics',data))
             # Start the local translator only after a safe raw camera frame exists.
             s['_ready'].set()
-            self.post_session(session_id,'connections','OBS: Güvenli     Kamera: Bağlı     Yerel: '+('Kapalı · tanılama' if s['_diagnostic'] else 'Hazır · ilk istek bekleniyor'))
+            self.post_session(session_id,'connections','OBS: Güvenli     Kamera: Bağlı     Yerel: '+('Kapalı · tanılama' if s['_diagnostic'] else 'Yükleniyor'))
             self.post_session(session_id, 'status', 'OCR hazır · ' + ('yalnız OCR' if s['_diagnostic'] else 'çeviri açık'))
             runner.run(stop_flag)
         except Exception as exc:
@@ -611,6 +654,7 @@ class MainWindow:
         try:
             metrics=self.subtitle_store.session_metrics(session)
             if getattr(self,'local_coordinator',None):metrics['local_engine']=self.local_coordinator.summary()
+            metrics['removal_samples']=self.subtitle_store.removal_latencies(session)
             atomic_json(config_folder()/'last_session_metrics.json',metrics)
         except OSError:self.log('Oturum metrikleri diske yazılamadı; SQLite kayıtları korunuyor.')
         self.metrics_saved_session=session
@@ -642,7 +686,7 @@ class MainWindow:
                         if not self.running:
                             continue
                 if kind == 'clear':
-                    pass  # OCR disappearance/change must not cancel a Turkish read clock.
+                    pass  # Visibility is atomically published by CaptureRunner into SQLite.
                 elif kind == "log":
                     self.log(args[0])
                 elif kind == "sources":
@@ -656,6 +700,8 @@ class MainWindow:
                     self.status_var.set('Replik yerel kayda alındı · yalnız OCR' if self.diagnostic_active
                                         else 'Replik kaydedildi · Yerel çeviri yapılıyor...')
                     self.last_source_var.set(args[0])
+                elif kind == 'ocr_metrics':
+                    self.metric_vars['ocr'].set(f"{args[0]['ocr_ms']:.1f} ms")
                 elif kind == 'connections':
                     self.connection_var.set(args[0])
                 elif kind == 'capture_summary':
@@ -667,6 +713,7 @@ class MainWindow:
                 elif kind == "local_demo":
                     translated, source, elapsed = args
                     self.overlay_state.set(translated, 12)
+                    self.metric_vars['translation'].set(f'{elapsed*1000:.1f} ms')
                     self.log(f"Yerel TEST EN: {source}")
                     self.log(f"Yerel TEST TR ({elapsed*1000:.0f} ms): {translated}")
                     self.status_var.set(f"Yerel test tamamlandı · {elapsed:.2f} saniye")
@@ -674,7 +721,7 @@ class MainWindow:
                     translated, source, elapsed,*_ = args
                     if hasattr(self,'last_translation_var'):
                         self.last_translation_var.set(translated)
-                        self.connection_var.set('OBS: Güvenli     Kamera: Bağlı     Yerel: Yanıt alındı')
+                    self.metric_vars['translation'].set(f'{elapsed*1000:.1f} ms')
                     self.log(f"TR ({elapsed*1000:.0f} ms): {translated}")
                     self.status_var.set(f"Aktif · son çeviri {elapsed:.2f} saniye")
                 elif kind == "status":
@@ -689,25 +736,40 @@ class MainWindow:
             pass
         engine=getattr(getattr(self,'local_coordinator',None),'engine',None)
         warm=engine is not None and not getattr(engine,'closed',True)
-        self.engine_info_var.set(f"Motor: {self.local_engine.get()} · {self.local_device.get().upper()} · "+
-                                 ('Model sıcak' if warm else 'Model yüklenmedi'))
-        self.session_info_var.set('Yerel çeviri')
+        self.engine_info_var.set(f"{self.local_engine.get()} · {self.local_device.get().upper()} · "+('Model sıcak' if warm else 'Model yüklenmedi / yükleniyor'))
         if not self.running and not self.preview_active and not any(w.is_alive() for w in self.workers):
-            self.connection_var.set('OBS: Bekliyor     Kamera: Kapalı     Yerel: Kapalı')
+            self.connection_var.set('OBS: Bekliyor   ·   Kamera: Kapalı   ·   Model: Kapalı')
             self._save_session_metrics()
-        state=self.overlay_state.snapshot()
-        blocks=state['blocks']
-        self.overlay.render_blocks(blocks)
+        elif self.running and self.capture_feed is not None and self.capture_feed.peek() is not None:
+            self.connection_var.set('OBS: Doğrulandı   ·   Kamera: Akıyor   ·   Model: '+('Sıcak' if warm else ('Kapalı · OCR' if self.diagnostic_active else 'Yükleniyor')))
+        state=self.overlay_state.snapshot();blocks=state['blocks']
+        self.overlay.render_blocks(blocks,state['style'])
+        ids={b['id'] for b in blocks};previous=getattr(self,'native_ids',set())
         if self.overlay.enabled:
             self.overlay_state.ack([b['id'] for b in blocks if b['started'] is None],state['generation'],'tk_render_submitted')
-        if hasattr(self,'shown_ids'):
-            for b in blocks:
-                if b['started'] is not None and b['id'] not in self.shown_ids:
-                    self.timeline.add(max(0,b['started']-self.start_at),b['text'])
-            self.shown_ids={b['id'] for b in blocks if b['started'] is not None}
-        if hasattr(self,'session_info_var') and self.running:
-            suffix=f" · Bekleyen: {state['waiting']} + çeviri {state['translation_pending']} · okuma birikimi ≈ {state['backlog_seconds']:.1f} sn"
-            self.session_info_var.set(self.session_info_var.get()+suffix+(' · YOĞUNLUK YÜKSEK' if state['overloaded'] else ''))
+            removed=list(previous-ids)
+            if removed:self.overlay_state.removed(removed,state['generation'],'tk_render_submitted')
+            self.native_ids=ids
+        else:self.native_ids=set()
+        # Export times follow actual visibility; parallel sources keep independent ends.
+        now=time.monotonic();history=getattr(self,'visible_history',{})
+        for b in blocks:
+            if b['started'] is not None and b['id'] not in history:
+                history[b['id']]=[max(0,b['started']-self.start_at),None,b['text']]
+        for job,event in history.items():
+            if event[1] is None and job not in ids:event[1]=max(event[0],now-self.start_at)
+        self.visible_history=history
+        self.timeline.events=[(a,b if b is not None else max(a,now-self.start_at),text) for a,b,text in history.values()]
+        if self.running:
+            self.metric_vars['active'].set(str(state.get('active_sources',0)))
+            self.session_info_var.set(f"Aktif kaynak: {state.get('active_sources',0)} · İşlem bekleyen: {state['translation_pending']} · Geçmiş replik gösterimi yok")
+        elif not self.preview_active:self.metric_vars['active'].set('—')
+        if now>=getattr(self,'next_diagnostics',0):
+            self.next_diagnostics=now+.25
+            self._refresh_diagnostics()
+        if now>=getattr(self,'next_preview',0):
+            self.next_preview=now+.25
+            self.refresh_live_preview(state)
         if not self.closing:self.pump_after = self.root.after(20, self.pump)
 
     def close(self):
@@ -745,6 +807,9 @@ class MainWindow:
         if self.server:
             self.server.shutdown()
             self.server.server_close()
+        for timer in self.root.tk.call('after','info'):
+            try:self.root.after_cancel(timer)
+            except tk.TclError:pass
         self.root.destroy()
 
 
@@ -764,7 +829,9 @@ def main():
         messagebox.showerror('Ediz Game Translator', 'Başka bir uygulama örneği açık.')
         return
     try:
-        root = tk.Tk()
+        import customtkinter as ctk
+        ctk.set_appearance_mode('dark')
+        root = ctk.CTk()
         MainWindow(root)
         root.mainloop()
     finally:

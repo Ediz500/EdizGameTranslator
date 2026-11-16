@@ -121,6 +121,7 @@ class Track:
     last_text: str = ''
     missed: int = 0
     retired: bool = False
+    absent_since: float | None = None
 
 
 @dataclass
@@ -134,14 +135,16 @@ class Observation:
 
 
 class ActiveSubtitles:
-    def __init__(self,hold=.85):
+    def __init__(self,hold=.85,*,live=False,debounce=.12):
         self.hold=hold
+        self.live=live;self.debounce=debounce
         self.tracks=[]
         self.expired=[]
 
     def update(self,candidates,now):
         def expired(t):
-            return t.retired or now-t.last_seen>self.hold or (t.missed>=2 and len(t.body.split())<=3)
+            absent=t.missed>=2 and t.absent_since is not None and now-t.absent_since>=self.debounce
+            return t.retired or now-t.last_seen>self.hold or (absent if self.live else t.missed>=2 and len(t.body.split())<=3)
         self.expired=[t for t in self.tracks if expired(t)]
         self.tracks=[t for t in self.tracks if not expired(t)][-16:]
         used=set(); observations=[]
@@ -166,6 +169,7 @@ class ActiveSubtitles:
                 reason=relation
             used.add(t.key)
             t.missed=0
+            t.absent_since=None
             new=False; corrected=False; dispatch=False
             if match is not None and relation in ('extension','continuation'):
                 if relation=='continuation':
@@ -199,7 +203,8 @@ class ActiveSubtitles:
         for t in self.tracks:
             if t.key not in used:
                 t.missed+=1
-                if len(t.body.split())<=3 and any(c.speaker.casefold()==t.speaker.casefold() and position_matches(t.box,c.box)
+                if t.absent_since is None:t.absent_since=now
+                if (self.live or len(t.body.split())<=3) and any((c.speaker.casefold()==t.speaker.casefold() or self.live and t.box is not None and c.box is not None) and position_matches(t.box,c.box)
                        for c in candidates):
                     t.retired=True
         return observations

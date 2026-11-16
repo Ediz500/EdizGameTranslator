@@ -33,11 +33,13 @@ class SessionTests(unittest.TestCase):
         w.status_var = MagicMock()
         w.engine_info_var=MagicMock();w.session_info_var=MagicMock()
         w.local_engine=MagicMock();w.local_device=MagicMock()
-        w.workers=[];w.preview_active=False
+        w.workers=[];w.preview_active=False;w.capture_feed=None;w.diagnostic_active=False
+        w.metric_vars={k:MagicMock() for k in ('ocr','translation','capacity','renderer','active','removal')}
+        w.timeline=MagicMock();w.start_at=0;w.refresh_live_preview=MagicMock()
         w.overlay = MagicMock()
         w.overlay.enabled=False
         w.overlay_state = MagicMock()
-        w.overlay_state.snapshot.return_value=dict(blocks=[],waiting=0,backlog_seconds=0,translation_pending=0,overloaded=False)
+        w.overlay_state.snapshot.return_value=dict(style={},blocks=[],waiting=0,backlog_seconds=0,translation_pending=0,overloaded=False)
         w.last_translation_var=MagicMock();w.connection_var=MagicMock()
         w.stop = MagicMock()
 

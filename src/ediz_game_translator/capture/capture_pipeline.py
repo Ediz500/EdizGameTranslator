@@ -126,7 +126,8 @@ class Metrics:
 
 class CaptureRunner:
     def __init__(self, frame, crop, ocr, store, session, diagnostic, on_change,
-                 on_accept, interval=.28, change_gate=None):
+                 on_accept, interval=.28, change_gate=None,*,live=False,debounce=.12,stale=.6,
+                 crop_rect=(0,0,1,1),on_metrics=None):
         if not math.isfinite(interval) or not .01 <= interval <= 5:
             raise ValueError('OCR interval must be 0.01–5 seconds')
         self.frame, self.crop, self.ocr = frame, crop, ocr
@@ -135,7 +136,9 @@ class CaptureRunner:
         self.interval = interval
         self.change_gate=change_gate
         self.gate = SubtitleGate()  # Legacy rule retained for comparison tests.
-        self.tracker = ActiveSubtitles()
+        self.live=live;self.crop_rect=crop_rect;self.on_metrics=on_metrics;self.next_metrics=0
+        self.tracker = ActiveSubtitles(live=live,debounce=debounce)
+        if live:self.store.enable_live_session(session,debounce,stale)
         self.foreground = None
         self.visible_keys = ()
         self.metrics = Metrics()
@@ -173,7 +176,8 @@ class CaptureRunner:
             self.diagnostic.write('cancelled', session=self.session, ocr_start=ocr_start, ocr_end=ocr_end)
             return 0
         candidates, evidence = dialogue_candidates(result, region.width, getattr(region,'height',0))
-        actions = self.tracker.update(candidates,sample_time)
+        tracking_candidates=([c for c in candidates if math.isfinite(c.confidence) and c.confidence>=.65] if self.live else candidates)
+        actions = self.tracker.update(tracking_candidates,sample_time)
         if self.change_gate is not None:
             self.change_gate.confirm=any(not a.track.accepted and a.candidate.confidence>=.65 for a in actions)
         primary = max(actions,key=lambda a:a.candidate.box[3] if a.candidate.box else a.candidate.indices[-1] if a.candidate.indices else 0) if actions else None
@@ -231,6 +235,20 @@ class CaptureRunner:
             self.active_first=primary.track.first_seen
             self.active_last=sample_time
         stored = time.perf_counter()
+        if self.live:
+            entries=[]
+            for action in actions:
+                track,candidate=action.track,action.candidate
+                if track.row is None:continue
+                bounds=None
+                if candidate.box is not None:
+                    x0,x1,y0,y1=candidate.box;l,t,r,b=self.crop_rect
+                    bounds=[l+x0/image.width,t+y0/image.height,l+x1/image.width,t+y1/image.height]
+                entries.append(dict(subtitle_id=track.row,track_key=track.key,canonical=track.canonical,
+                    speaker=track.speaker,bounds=bounds))
+            self.store.publish_sources(self.session,entries,sample_time,decided_mono=stored,
+                retired=[t.key for t in self.tracker.tracks if t.retired]+[t.key for t in self.tracker.expired],
+                frame_size=(image.width,image.height))
         for action in actions:
             if action.dispatch:
                 # Each callback is ONE speaker's current observed fragment, never a mixed string.
@@ -250,6 +268,10 @@ class CaptureRunner:
         self.metrics.count += 1
         self.metrics.skipped += packet.skipped if packet else 0
         self.metrics.overruns += end-start > self.interval
+        if self.on_metrics is not None and end>=self.next_metrics:
+            self.next_metrics=end+.25
+            self.on_metrics(dict(ocr_ms=(ocr_end-ocr_start)*1000,frame_age_ms=max(0,(ocr_end-sample_time)*1000),
+                                 captured_mono=sample_time,accepted=self.metrics.accepted))
         self.diagnostic.write('frame', session=self.session, request_utc=request_utc,
             request_mono=start, received_mono=received, received_utc=captured_utc,
             ocr_start=ocr_start, ocr_end=ocr_end,

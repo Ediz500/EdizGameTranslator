@@ -10,13 +10,14 @@ from pathlib import Path
 from typing import Any
 from copy import deepcopy
 from ediz_game_translator.storage.region_profiles import normalize_profiles
+from ediz_game_translator.storage.subtitle_styles import normalize_styles
 
 
 DEFAULTS: dict[str, Any] = {
     "obs_port": 4455,
     "obs_source": "",
     "capture_width": 960,
-    "capture_method": 'ediz_game_translator.capture.virtual_camera',
+    "capture_method": 'virtual_camera',
     "ocr_profile": "bounded960_cpu2",
     "camera_config": "",
     "translation_engine": "ct2-marian",
@@ -33,6 +34,9 @@ DEFAULTS: dict[str, Any] = {
     "change_check_interval": 0.02,
     "full_ocr_interval": 0.15,
     "display_transport": "sse",
+    "subtitle_profiles": {},
+    "live_debounce": 0.12,
+    "source_timeout": 0.6,
     "crop_left": 0,
     "crop_top": 65,
     "crop_right": 100,
@@ -67,8 +71,10 @@ def load_settings() -> dict:
         settings=deepcopy(DEFAULTS) | {k: v for k, v in incoming.items() if k in DEFAULTS}
         try:settings['ocr_regions']=normalize_profiles(settings.get('ocr_regions',{}))
         except ValueError:settings['ocr_regions']={}
+        try:settings['subtitle_profiles']=normalize_styles(settings.get('subtitle_profiles',{}))
+        except ValueError:settings['subtitle_profiles']={}
         # Unknown historical fields are ignored. No credential or legacy data files are touched.
-        settings['capture_method']='ediz_game_translator.capture.virtual_camera'
+        settings['capture_method']='virtual_camera'
         return settings
     except (ValueError, OSError):
         return deepcopy(DEFAULTS)
@@ -79,6 +85,7 @@ def save_settings(settings: dict) -> None:
     p.parent.mkdir(parents=True, exist_ok=True)
     allowed = {k: settings[k] for k in DEFAULTS if k in settings}
     if 'ocr_regions' in allowed:allowed['ocr_regions']=normalize_profiles(allowed['ocr_regions'])
+    if 'subtitle_profiles' in allowed:allowed['subtitle_profiles']=normalize_styles(allowed['subtitle_profiles'])
     atomic_json(p, allowed)
 
 

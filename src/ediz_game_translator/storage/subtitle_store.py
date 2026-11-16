@@ -4,9 +4,10 @@ import threading
 import time
 import json
 from pathlib import Path
+from .live_sources import LiveSources
 
 
-class SubtitleStore:
+class SubtitleStore(LiveSources):
     def __init__(self, path):
         Path(path).parent.mkdir(parents=True, exist_ok=True)
         self.lock = threading.RLock()
@@ -54,6 +55,7 @@ class SubtitleStore:
         self.db.execute('CREATE INDEX IF NOT EXISTS jobs_translation ON translation_jobs(session,translation_state,id)')
         self.db.execute('CREATE INDEX IF NOT EXISTS jobs_display ON translation_jobs(session,display_state,id)')
         job_columns={r[1] for r in self.db.execute('PRAGMA table_info(translation_jobs)')}
+        self.legacy_called_column='api_called' in job_columns
         # Additive migration only. Historical billing columns/values stay in
         # existing databases; new databases do not create or track them.
         if 'translation_start_mono' not in job_columns:
@@ -71,6 +73,7 @@ class SubtitleStore:
         self.db.execute("UPDATE translation_jobs SET display_state='cancelled',cancel_reason='process_restart' WHERE display_state NOT IN ('completed','cancelled','skipped')")
         self.db.execute("UPDATE translation_jobs SET translation_state='interrupted' WHERE translation_state IN ('queued','translating')")
         self.db.execute('PRAGMA user_version=4')
+        self.initialize_live_sources()
         self.db.execute("UPDATE subtitles SET status='interrupted' WHERE status IN ('queued','translating')")
         self.db.commit()
 
@@ -137,9 +140,11 @@ class SubtitleStore:
                                     (source,time.time(),existing[0]))
                     return existing[0]
             speaker=self.db.execute('SELECT speaker FROM subtitles WHERE id=?',(row,)).fetchone()[0] or ''
-            job=self.db.execute('''INSERT INTO translation_jobs
-                (session,subtitle_id,source,speaker,model,accepted_mono,updated_utc) VALUES (?,?,?,?,?,?,?)''',
-                (session,row,source,speaker,model,accepted,time.time())).lastrowid
+            fields=['session','subtitle_id','source','speaker','model','accepted_mono','updated_utc']
+            values=[session,row,source,speaker,model,accepted,time.time()]
+            if self.legacy_called_column and model.startswith('local:'):
+                fields.append('api_called');values.append(0)  # Existing history is never rewritten.
+            job=self.db.execute('INSERT INTO translation_jobs ('+','.join(fields)+') VALUES ('+','.join('?' for _ in values)+')',values).lastrowid
             self.db.execute("UPDATE subtitles SET status='queued' WHERE id=?",(row,))
             self.condition.notify_all()
             return job
@@ -164,11 +169,14 @@ class SubtitleStore:
 
     def claim_translation(self,session,now):
         with self.lock,self.db:
+            live=session in self.live_options
+            if live:self._expire_sources(session,now)
+            current=" AND EXISTS(SELECT 1 FROM live_sources s WHERE s.subtitle_id=j.subtitle_id AND s.session=j.session AND s.active=1)" if live else ''
             cursor=self.db.execute("""SELECT id,subtitle_id,source,model,accepted_mono FROM translation_jobs j
                 WHERE session=? AND translation_state='queued' AND display_state!='cancelled'
                 AND NOT EXISTS(SELECT 1 FROM translation_jobs active WHERE active.session=j.session
                     AND active.subtitle_id=j.subtitle_id AND active.translation_state='translating')
-                ORDER BY id LIMIT 1""",(session,))
+                """+current+" ORDER BY id LIMIT 1",(session,))
             row=cursor.fetchone()
             if row is None:return None
             self.db.execute("UPDATE translation_jobs SET translation_state='translating',translation_start_mono=?,updated_utc=? WHERE id=?",(now,time.time(),row[0]))
@@ -185,10 +193,10 @@ class SubtitleStore:
     def complete_translation(self,job,text,now,duration=None):
         from ediz_game_translator.subtitles.subtitle_display import reading_seconds
         with self.lock,self.db:
-            row=self.db.execute('SELECT subtitle_id,speaker,display_state,translation_start_mono FROM translation_jobs WHERE id=?',(job,)).fetchone()
+            row=self.db.execute('SELECT subtitle_id,speaker,display_state,translation_start_mono,session FROM translation_jobs WHERE id=?',(job,)).fetchone()
             if row is None:raise ValueError('Çeviri işi bulunamadı.')
             if row[1] and text.casefold().startswith(row[1].casefold()+':'):text=text[len(row[1])+1:].lstrip()
-            duration=reading_seconds(text) if duration is None else duration
+            duration=(None if row[4] in self.live_options else reading_seconds(text)) if duration is None else duration
             state='cancelled' if row[2]=='cancelled' else 'waiting'
             newer=self.db.execute('SELECT 1 FROM translation_jobs WHERE subtitle_id=? AND id>? LIMIT 1',(row[0],job)).fetchone()
             model=self.db.execute('SELECT model FROM translation_jobs WHERE id=?',(job,)).fetchone()[0]
@@ -250,6 +258,7 @@ class SubtitleStore:
 
     def cancel_session(self,session,reason='user_stop'):
         with self.lock,self.db:
+            self.db.execute('UPDATE live_sources SET active=0,ended_mono=COALESCE(ended_mono,?),reason=? WHERE session=? AND active=1',(time.monotonic(),reason,session))
             self.db.execute("UPDATE translation_jobs SET display_state='cancelled',cancel_reason=?,updated_utc=? WHERE session=? AND display_state NOT IN ('completed','cancelled','skipped')",(reason,time.time(),session))
             self.db.execute("UPDATE translation_jobs SET translation_state='cancelled' WHERE session=? AND translation_state='queued'",(session,))
             self.condition.notify_all()

@@ -37,7 +37,7 @@ def write_new(path,value):
 
 
 def export_corpus(database,limit=75):
-    if not 50<=limit<=100:raise ValueError('Choose 50â€“100 lines')
+    if not 50<=limit<=100:raise ValueError('Choose 50–100 lines')
     db=readonly(database)
     try:
         db.row_factory=sqlite3.Row
@@ -298,7 +298,7 @@ def main():
     elif args.command=='audit':report=audit(args.database)
     elif args.command=='quality':report=quality_summary(args.review)
     else:
-        if not 1<=args.repeats<=10:raise ValueError('Repeats must be 1â€“10')
+        if not 1<=args.repeats<=10:raise ValueError('Repeats must be 1–10')
         report=run_benchmark(args)
     write_new(args.output,report)
     print(json.dumps({k:v for k,v in report.items() if k not in ('entries','results','resources','replays','sessions')},ensure_ascii=False,indent=2))

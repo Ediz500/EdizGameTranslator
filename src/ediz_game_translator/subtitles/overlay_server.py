@@ -9,6 +9,10 @@ from urllib.parse import urlparse
 
 from ediz_game_translator.subtitles.overlay_view import OVERLAY_HTML
 from ediz_game_translator.subtitles.subtitle_display import DisplayManager
+from ediz_game_translator.subtitles.live_display import LiveDisplayManager
+from ediz_game_translator.subtitles.layout import arrange_blocks
+from ediz_game_translator.storage.subtitle_styles import DEFAULT_STYLE,valid_style
+from copy import deepcopy
 import uuid
 
 
@@ -18,25 +22,32 @@ class SharedOverlayState:
         self.lock=threading.RLock();self.manager=None;self.demo_store=None
         self.generation=uuid.uuid4().hex;self.browser_seen=0
         self.transport='poll'
+        self.style=deepcopy(DEFAULT_STYLE)
 
-    def bind(self,store,session,ready_first=False):
+    def bind(self,store,session,ready_first=False,*,live=False):
         with self.lock:
             self.clear('new_session')
             if self.demo_store is not None:
                 self.demo_store.close();self.demo_store=None
-            self.manager=DisplayManager(store,session,ready_first=ready_first)
+            self.manager=(LiveDisplayManager(store,session) if live else DisplayManager(store,session,ready_first=ready_first))
+
+    def configure_style(self,style):
+        with self.lock:self.style=valid_style(style);self.font=self.style['font_size'];self.version+=1
 
     def set(self,text,lifetime=7):
         # Standalone manual/demo output only. Live jobs go directly to SQLite.
         from ediz_game_translator.storage.subtitle_store import SubtitleStore
         with self.lock:
+            if self.manager is not None and self.manager.session!='manual':return False
             if self.manager is None:
                 if self.demo_store is not None:self.demo_store.close()
                 self.demo_store=SubtitleStore(':memory:')
-                self.manager=DisplayManager(self.demo_store,'manual')
+                self.manager=LiveDisplayManager(self.demo_store,'manual')
             store=self.manager.store;session=self.manager.session;now=time.monotonic()
             row=store.accept(session,'Manual example',now,now,time.time(),now,1,'manual')
-            job=store.enqueue_translation(session,row,'Manual example','gpt-6-luna',now)
+            retired=[r[0] for r in store.db.execute('SELECT track_key FROM live_sources WHERE session=? AND active=1',(session,))]
+            store.publish_sources(session,[dict(subtitle_id=row,track_key=str(row),canonical='Manual example',speaker='',manual_until=now+lifetime)],now,retired=retired)
+            job=store.enqueue_translation(session,row,'Manual example','local:manual',now)
             store.complete_translation(job,text,now,duration=lifetime)
             self.version+=1
 
@@ -49,7 +60,8 @@ class SharedOverlayState:
         with self.lock:
             if self.manager:self.manager.browser_required=self.browser_seen>0 and time.monotonic()-self.browser_seen<2
             data=self.manager.snapshot() if self.manager else dict(blocks=[],waiting=0,backlog_seconds=0,translation_pending=0,overloaded=False)
-            return dict(**data,generation=self.generation,font=self.font,bottom=self.bottom,version=self.version)
+            data['blocks']=arrange_blocks(data['blocks'],self.style)
+            return dict(**data,generation=self.generation,font=self.font,bottom=self.bottom,version=self.version,style=deepcopy(self.style))
 
     def json(self):
         with self.lock:
@@ -57,7 +69,7 @@ class SharedOverlayState:
             data=self.snapshot()
             if self.manager:self.manager.sent()
             data['text']=data['blocks'][0]['text'] if data['blocks'] else ''
-            data['until']=time.time()+data['blocks'][0]['remaining'] if data['blocks'] else 0
+            data['until']=0  # Compatibility only; live captions have no reading countdown.
             return json.dumps(data,ensure_ascii=False).encode('utf-8')
 
     def record_sent(self,data,transport):
@@ -79,6 +91,11 @@ class SharedOverlayState:
     def current(self):
         blocks=self.snapshot()['blocks']
         return blocks[0]['text'] if blocks else ''
+
+    def removed(self,ids,generation,renderer='browser_dom_ack'):
+        with self.lock:
+            if generation!=self.generation or self.manager is None or not hasattr(self.manager,'removed'):return 0
+            return self.manager.removed(ids,renderer)
 
     def close(self):
         self.clear('app_close')
@@ -110,8 +127,8 @@ def launch_server(state: SharedOverlayState, port: int = 8788):
                     self.connection.settimeout(2)
                     while not self.server.stream_stop.is_set():
                         body=state.json();data=json.loads(body)
-                        signature=(data['generation'],data['font'],data['bottom'],data['waiting'],data['translation_pending'],
-                            tuple((b['id'],b['text'],b['speaker'],b['started'],b['speed']) for b in data['blocks']))
+                        signature=(data['generation'],json.dumps(data['style'],sort_keys=True),
+                            tuple((b['id'],b['text'],b['speaker'],tuple(b['mask_rect']),tuple(b.get('source_size',(1920,1080)))) for b in data['blocks']))
                         if signature!=last:
                             self.wfile.write(b'data: '+body+b'\n\n');self.wfile.flush()
                             state.record_sent(data,'sse');last=signature;heartbeat=time.monotonic()
@@ -156,7 +173,10 @@ def launch_server(state: SharedOverlayState, port: int = 8788):
                 payload=json.loads(self.rfile.read(length))
                 ids=payload['ids'];generation=payload['generation']
                 if not isinstance(ids,list) or len(ids)>3 or any(type(i) is not int for i in ids):raise ValueError()
+                removed=payload.get('removed',[])
+                if not isinstance(removed,list) or len(removed)>3 or any(type(i) is not int for i in removed):raise ValueError()
                 state.ack(ids,generation)
+                state.removed(removed,generation)
             except (ValueError,KeyError,TypeError):self.send_error(400);return
             self.send_response(204);self.end_headers()
 

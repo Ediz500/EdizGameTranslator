@@ -57,5 +57,8 @@ def rename_game(settings,old,new):
         raise ValueError('Bu adda bir oyun zaten var. Başka bir ad seçin.')
     entry=profiles.pop(old_key)
     profiles[new_key]=dict(name=new.strip(),rect=entry['rect'])
+    if old_key in result.get('subtitle_profiles',{}):
+        style=result['subtitle_profiles'].pop(old_key)
+        result['subtitle_profiles'][new_key]=dict(style,name=new.strip())
     result['game']=new.strip()
     return result

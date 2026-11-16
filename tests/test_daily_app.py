@@ -32,7 +32,7 @@ class TransitionTests(unittest.TestCase):
                        estimated_total_usd=1.25,token_total_in=987,lore='Existing note')
             (Path(folder)/'settings.json').write_text(json.dumps(old))
             loaded=load_settings()
-        self.assertEqual(loaded['capture_method'],'ediz_game_translator.capture.virtual_camera')
+        self.assertEqual(loaded['capture_method'],'virtual_camera')
         for key in ('game','crop_top','lore'):
             self.assertEqual(loaded[key],old[key])
 
@@ -132,7 +132,8 @@ class DailyGuiTests(unittest.TestCase):
         self.local.translate.return_value=dict(text='Beni takip et!',complete=True,processing_ms=1)
         self.local_factory=self.stack.enter_context(patch('ediz_game_translator.app.WarmNMTClient',return_value=self.local))
         self.stack.enter_context(patch('ediz_game_translator.app.model_manifest',return_value=(self.folder,{})))
-        self.root=tk.Tk();self.w=app.MainWindow(self.root)
+        import customtkinter as ctk
+        self.root=ctk.CTk();self.w=app.MainWindow(self.root)
         config={'name':'Test','virtual-camera':{'type2':2,'source':'Raw'},
                 'sources':[{'name':'Raw','id':'dshow_input','settings':{'video_device_id':'raw-card'},'filters':[]}]}
         self.config=self.folder/'collection.json';self.config.write_text(json.dumps(config))
@@ -200,17 +201,17 @@ class DailyGuiTests(unittest.TestCase):
         self.assertEqual(self.cloud_guard.attempts,[])
         self.assertEqual(self.w.overlay_state.current(),'')
 
-    def test_two_pages_and_game_rename_save_restore_without_secret_writes(self):
-        self.assertEqual(set(self.w.pages),{'Ana Sayfa','Ayarlar'})
+    def test_five_pages_and_game_rename_save_restore_without_secret_writes(self):
+        self.assertEqual(set(self.w.pages),{'Canlı Çeviri','Altyazı Tasarımı','Oyun Profilleri','Bağlantılar','Tanılama'})
         self.assertFalse(self.w.advanced_open.get())
         self.w._change_game('Another Game')
         self.w._change_game('Renamed Game',rename=True)
         self.assertEqual(load_settings()['game'],'Renamed Game')
         self.secret_save.assert_not_called()
-        self.w.show_page('Ayarlar');self.root.update()
+        self.w.show_page('Bağlantılar');self.root.update()
         self.root.geometry('900x650');self.root.update()
-        self.assertTrue(self.w.pages['Ayarlar'].outer.winfo_viewable())
-        self.assertFalse(self.w.pages['Ana Sayfa'].outer.winfo_viewable())
+        self.assertTrue(self.w.pages['Bağlantılar'].outer.winfo_viewable())
+        self.assertFalse(self.w.pages['Canlı Çeviri'].outer.winfo_viewable())
 
     def test_game_save_failure_is_atomic_and_does_not_overwrite_profile(self):
         old=deepcopy(self.w.settings)
@@ -267,20 +268,64 @@ class DailyGuiTests(unittest.TestCase):
         self.assertEqual(self.w.overlay_state.current(),'')
         self.assertEqual(self.w.last_translation_var.get(),'EXPIRED')
 
-    def test_translation_survives_old_five_second_policy_and_ocr_disappearance(self):
-        self.w.settings['translation_max_age']=.01
-        def response(source):
-            time.sleep(.08)
-            return dict(text='Late',complete=True,processing_ms=80)
-        self.local.translate.side_effect=response
-        self.w.start();self.wait(lambda:self.local.translate.call_count>0)
-        def saved():
-            with closing(sqlite3.connect(self.folder/'subtitles.sqlite3')) as db:
-                return db.execute('SELECT status FROM subtitles').fetchone()[0]=='translated'
-        self.wait(saved)
-        self.w.latest_seq+=1
-        self.w.post_session(self.w.session_id,'clear',self.w.latest_seq)
-        self.root.update()
-        self.assertEqual(self.w.overlay_state.current(),'Late')
+    def test_source_disappearance_removes_translation_but_preserves_history(self):
+        self.w.start();self.wait(lambda:self.w.overlay_state.current()=='Beni takip et!')
+        began=time.monotonic()
+        self.ocr.return_value=SimpleNamespace(txts=[],scores=[],boxes=None)
+        self.wait(lambda:self.w.overlay_state.current()=='',timeout=1)
+        self.assertLess(time.monotonic()-began,.6)
         with closing(sqlite3.connect(self.folder/'subtitles.sqlite3')) as db:
-            self.assertEqual(db.execute('SELECT status FROM subtitles').fetchone()[0],'translated')
+            self.assertEqual(db.execute('SELECT translated FROM translation_jobs').fetchone()[0],'Beni takip et!')
+
+    def test_late_result_after_source_disappearance_never_reappears(self):
+        entered=threading.Event();release=threading.Event()
+        def slow(source):
+            entered.set();release.wait(3)
+            return dict(text='Late',complete=True,processing_ms=1)
+        self.local.translate.side_effect=slow
+        self.w.start();self.wait(entered.is_set)
+        self.ocr.return_value=SimpleNamespace(txts=[],scores=[],boxes=None)
+        self.wait(lambda:self.w.subtitle_store.db.execute('SELECT active FROM live_sources').fetchone()[0]==0)
+        release.set()
+        self.wait(lambda:self.w.subtitle_store.db.execute('SELECT translation_state FROM translation_jobs').fetchone()[0]=='completed')
+        self.assertEqual(self.w.overlay_state.current(),'')
+
+    def test_game_style_save_is_separate_from_obs_credentials_and_resets_preview(self):
+        self.w.speaker_color.set('#FFD166');self.w.show_speaker.set(False)
+        self.w.save_subtitle_style();self.secret_save.assert_not_called()
+        self.w.show_speaker.set(True);self.w.reset_subtitle_style()
+        self.assertFalse(self.w.show_speaker.get())
+        self.assertEqual(self.w.overlay_state.snapshot()['style']['speaker_color'],'#FFD166')
+
+    def test_window_and_widget_scaling_125_and_150_preserve_primary_controls(self):
+        import customtkinter as ctk
+        try:
+            for scale in (1.25,1.5):
+                ctk.set_widget_scaling(scale);ctk.set_window_scaling(scale)
+                self.root.geometry('1100x620');self.w.show_page('Canlı Çeviri');self.root.update()
+                self.assertTrue(self.w.start_btn.winfo_viewable())
+                right=self.w.start_btn.winfo_rootx()+self.w.start_btn.winfo_width()
+                self.assertLessEqual(right,self.root.winfo_rootx()+self.root.winfo_width())
+                for page in self.w.pages:
+                    self.w.show_page(page);self.root.update()
+                    self.assertTrue(self.w.pages[page].outer.winfo_viewable())
+        finally:
+            ctk.set_widget_scaling(1);ctk.set_window_scaling(1)
+
+    def test_native_names_mask_and_resolution_scaling_use_shared_geometry(self):
+        from ediz_game_translator.subtitles.canvas_view import draw_captions
+        from ediz_game_translator.subtitles.layout import arrange_blocks
+        from ediz_game_translator.storage.subtitle_styles import DEFAULT_STYLE
+        c=self.w.style_canvas;style=dict(DEFAULT_STYLE)
+        sample=dict(id=1,text='Burada kal.',speaker='Scout',bounds=[.2,.8,.8,.9],source_size=[960,540])
+        blocks=arrange_blocks([sample],style);draw_captions(c,blocks,style,960,540)
+        self.assertEqual(c.itemcget(c.find_withtag('mask')[0],'fill'),'#000000')
+        self.assertEqual(c.itemcget(c.find_withtag('speaker')[0],'fill'),'#50E2BE')
+        self.assertEqual(c.itemcget(c.find_withtag('dialogue')[0],'fill'),'#FFFFFF')
+        small_font=c.itemcget(c.find_withtag('dialogue')[0],'font')
+        sample['source_size']=[1920,1080]
+        draw_captions(c,arrange_blocks([sample],style),style,960,540)
+        self.assertEqual(c.itemcget(c.find_withtag('dialogue')[0],'font'),small_font)
+        draw_captions(c,blocks,dict(style,show_speaker=False),960,540)
+        self.assertFalse(c.find_withtag('speaker'))
+        draw_captions(c,[],style,960,540);self.assertFalse(c.find_withtag('mask'))

@@ -15,33 +15,33 @@ class LocalEngineError(RuntimeError):pass
 
 
 def validate_capacity(workers,threads,device):
-    if type(workers) is not int or not 1<=workers<=4:raise ValueError('Yerel eÅŸzamanlÄ±lÄ±k 1â€“4 olmalÄ±.')
-    if type(threads) is not int or not 1<=threads<=8:raise ValueError('CPU iÅŸ parÃ§acÄ±ÄŸÄ± sayÄ±sÄ± 1â€“8 olmalÄ±.')
-    if workers*threads>max(1,min(16,os.cpu_count() or 1)):raise ValueError('CPU kapasitesi aÅŸÄ±lÄ±yor.')
-    if device not in ('cpu','cuda'):raise ValueError('AygÄ±t cpu veya cuda olmalÄ±.')
-    if device=='cuda' and workers!=1:raise ValueError('GPU iÃ§in bu sÃ¼rÃ¼mde eÅŸzamanlÄ±lÄ±k 1 olmalÄ±.')
+    if type(workers) is not int or not 1<=workers<=4:raise ValueError('Yerel eşzamanlılık 1–4 olmalı.')
+    if type(threads) is not int or not 1<=threads<=8:raise ValueError('CPU iş parçacığı sayısı 1–8 olmalı.')
+    if workers*threads>max(1,min(16,os.cpu_count() or 1)):raise ValueError('CPU kapasitesi aşılıyor.')
+    if device not in ('cpu','cuda'):raise ValueError('Aygıt cpu veya cuda olmalı.')
+    if device=='cuda' and workers!=1:raise ValueError('GPU için bu sürümde eşzamanlılık 1 olmalı.')
 
 
 def model_manifest(folder,verify=True):
     path=Path(folder).resolve()
     if not (path/'ediz_nmt.json').is_file():
-        raise LocalEngineError('Yerel model bulunamadÄ±. Model klasÃ¶rÃ¼nÃ¼ seÃ§in; otomatik indirme ve bulut fallback kapalÄ±.')
+        raise LocalEngineError('Yerel model bulunamadı. Model klasörünü seçin; otomatik indirme ve bulut fallback kapalı.')
     data=json.loads((path/'ediz_nmt.json').read_text(encoding='utf-8'))
     if data.get('engine') not in ('ct2-marian','argos-ct2') or (data.get('source_lang'),data.get('target_lang'))!=('en','tr'):
-        raise LocalEngineError('YalnÄ±z doÄŸrulanmÄ±ÅŸ doÄŸrudan ENâ†’TR modeli desteklenir.')
+        raise LocalEngineError('Yalnız doğrulanmış doğrudan EN→TR modeli desteklenir.')
     for name in ('model.bin','source.spm','target.spm'):
-        if not (path/name).is_file():raise LocalEngineError('Model dosyasÄ± eksik: '+name)
+        if not (path/name).is_file():raise LocalEngineError('Model dosyası eksik: '+name)
         if verify and hashlib.sha256((path/name).read_bytes()).hexdigest()!=data.get('files',{}).get(name):
-            raise LocalEngineError('Model bÃ¼tÃ¼nlÃ¼k kontrolÃ¼ baÅŸarÄ±sÄ±z: '+name)
+            raise LocalEngineError('Model bütünlük kontrolü başarısız: '+name)
     return path,data
 
 
 class WarmNMTClient:
     def __init__(self,python,folder,device='cpu',compute_type='int8',workers=2,threads=2,
-                 request_timeout=15,load_timeout=120,on_start=None,beam_size=1):
+                 request_timeout=15,load_timeout=120,on_start=None,beam_size=1,stop_event=None):
         validate_capacity(workers,threads,device)
         model_manifest(folder,verify=False)
-        if not python or not Path(python).is_file():raise LocalEngineError('Yerel motor Python yolu bulunamadÄ±.')
+        if not python or not Path(python).is_file():raise LocalEngineError('Yerel motor Python yolu bulunamadı.')
         self.lock=threading.RLock();self.write_lock=threading.Lock()
         self.pending={0:Future()};self.next_id=0;self.closed=False
         self.capacity=threading.BoundedSemaphore(workers);self.request_timeout=request_timeout
@@ -56,11 +56,19 @@ class WarmNMTClient:
         if on_start:on_start(self.process.pid)
         ready=self.pending[0]
         self.reader=threading.Thread(target=self._read,name='local-nmt-results',daemon=True);self.reader.start()
-        try:self.ready=ready.result(timeout=load_timeout)
+        try:
+            deadline=time.monotonic()+load_timeout
+            while True:
+                if stop_event is not None and stop_event.is_set():raise LocalEngineError('Model yüklemesi kullanıcı tarafından durduruldu.')
+                remaining=deadline-time.monotonic()
+                if remaining<=0:raise TimeoutError()
+                try:
+                    self.ready=ready.result(timeout=min(.05,remaining));break
+                except TimeoutError:continue
         except Exception as exc:
             self.close()
             if isinstance(exc,LocalEngineError):raise
-            raise LocalEngineError('Yerel model yÃ¼klemesi zaman aÅŸÄ±mÄ±na uÄŸradÄ±.') from None
+            raise LocalEngineError('Yerel model yüklemesi zaman aşımına uğradı.') from None
 
     def _fail_all(self,message):
         with self.lock:
@@ -79,27 +87,27 @@ class WarmNMTClient:
                     if 'error' in response:f.set_exception(LocalEngineError(response['error']))
                     else:f.set_result(response)
                 if response.get('fatal'):
-                    self._fail_all('Yerel model hata verdi; sÃ¼reÃ§ durdurulmalÄ±.');break
-        finally:self._fail_all('Yerel motor kapandÄ±; otomatik bulut fallback yapÄ±lmadÄ±.')
+                    self._fail_all('Yerel model hata verdi; süreç durdurulmalı.');break
+        finally:self._fail_all('Yerel motor kapandı; otomatik bulut fallback yapılmadı.')
 
     def translate(self,text):
-        if not isinstance(text,str) or not text.strip() or len(text)>360:raise ValueError('AltyazÄ± 1â€“360 karakter olmalÄ±.')
+        if not isinstance(text,str) or not text.strip() or len(text)>360:raise ValueError('Altyazı 1–360 karakter olmalı.')
         if not self.capacity.acquire(timeout=self.request_timeout):raise LocalEngineError('Yerel motor kapasitesi dolu.')
         try:
             with self.lock:
-                if self.closed:raise LocalEngineError('Yerel motor Ã§alÄ±ÅŸmÄ±yor.')
+                if self.closed:raise LocalEngineError('Yerel motor çalışmıyor.')
                 self.next_id+=1;rid=self.next_id;f=Future();self.pending[rid]=f
             began=time.perf_counter()
             with self.write_lock:
                 self.process.stdin.write(json.dumps(dict(id=rid,text=text))+'\n');self.process.stdin.flush()
             try:result=f.result(timeout=self.request_timeout)
             except TimeoutError:
-                self.close();raise LocalEngineError('Yerel Ã§eviri zaman aÅŸÄ±mÄ±; iÅŸÃ§i kapatÄ±ldÄ±.') from None
+                self.close();raise LocalEngineError('Yerel çeviri zaman aşımı; işçi kapatıldı.') from None
             result['roundtrip_ms']=(time.perf_counter()-began)*1000
-            if not result.get('complete'):raise LocalEngineError('Yerel motor eksik/boÅŸ Ã§eviri dÃ¶ndÃ¼rdÃ¼.')
+            if not result.get('complete'):raise LocalEngineError('Yerel motor eksik/boş çeviri döndürdü.')
             return result
         except (BrokenPipeError,OSError):
-            self.close();raise LocalEngineError('Yerel model baÄŸlantÄ±sÄ± kesildi.') from None
+            self.close();raise LocalEngineError('Yerel model bağlantısı kesildi.') from None
         finally:self.capacity.release()
 
     def close(self):
@@ -133,7 +141,7 @@ class CT2Translator:
         import ctranslate2
         import sentencepiece
         supported=ctranslate2.get_supported_compute_types(args.device)
-        if args.compute_type not in supported:raise LocalEngineError('Ä°stenen compute_type aygÄ±tta desteklenmiyor.')
+        if args.compute_type not in supported:raise LocalEngineError('İstenen compute_type aygıtta desteklenmiyor.')
         os.chdir(folder)  # Child process only; keep native Windows paths ASCII-relative.
         self.model=ctranslate2.Translator('.',device=args.device,compute_type=args.compute_type,
             inter_threads=args.workers,intra_threads=args.threads,max_queued_batches=args.workers)
@@ -146,7 +154,7 @@ class CT2Translator:
 
     def translate(self,text):
         began=time.perf_counter();tokens=self.source.encode(text,out_type=str)+['</s>']
-        if len(tokens)>256:raise ValueError('Kaynak token sÄ±nÄ±rÄ±nÄ± aÅŸÄ±yor; sessiz kÄ±rpma yapÄ±lmadÄ±.')
+        if len(tokens)>256:raise ValueError('Kaynak token sınırını aşıyor; sessiz kırpma yapılmadı.')
         answer=self.model.translate_batch([tokens],beam_size=self.beam_size,max_decoding_length=256,
             max_input_length=0,return_end_token=False)[0].hypotheses[0]
         result=self.target.decode(answer).strip()
