@@ -106,6 +106,16 @@ class SharedOverlayState:
 
 def launch_server(state: SharedOverlayState, port: int = 8788):
     class OverlayHTTPServer(ThreadingHTTPServer):
+        # Windows SO_REUSEADDR lets a second process bind the same port silently;
+        # exclusive binding makes a port conflict an error instead of a hijack.
+        allow_reuse_address = False
+
+        def server_bind(self):
+            import socket
+            if hasattr(socket, 'SO_EXCLUSIVEADDRUSE'):
+                self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+            super().server_bind()
+
         def shutdown(self):
             self.stream_stop.set()
             super().shutdown()

@@ -259,6 +259,17 @@ class CaptureRunner:
                     bounds=[l+x0/image.width,t+y0/image.height,l+x1/image.width,t+y1/image.height]
                 entries.append(dict(subtitle_id=track.row,track_key=track.key,canonical=track.canonical,
                     speaker=track.speaker,bounds=bounds))
+            published={e['subtitle_id'] for e in entries}
+            for track in self.tracker.held:
+                # A verified utterance overlapped only by an unconfirmed conflicting
+                # reading is still on screen; keep its source (bounded by CONTEST_HOLD).
+                if track.row is None or track.row in published:continue
+                bounds=None
+                if track.box is not None:
+                    x0,x1,y0,y1=track.box;l,t,r,b=self.crop_rect
+                    bounds=[l+x0/image.width,t+y0/image.height,l+x1/image.width,t+y1/image.height]
+                entries.append(dict(subtitle_id=track.row,track_key=track.key,canonical=track.canonical,
+                    speaker=track.speaker,bounds=bounds))
             self.store.publish_sources(self.session,entries,sample_time,decided_mono=stored,
                 retired=[t.key for t in self.tracker.tracks if t.retired]+[t.key for t in self.tracker.expired],
                 frame_size=(image.width,image.height))

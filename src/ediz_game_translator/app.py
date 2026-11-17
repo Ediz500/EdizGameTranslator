@@ -97,12 +97,15 @@ class MainWindow:
         self.game.trace_add('write',self._load_game_region)
         self._load_game_region()
         self._populate_monitors()
+        self.server = None
         try:
             self.server = launch_server(self.overlay_state)
             self.log("OBS altyazı sunucusu hazır: " + OBS_OVERLAY_URL)
         except OSError as exc:
+            # Exclusive bind: another process owns 8788, so live translation stays disabled.
             self.log(f"HATA: 8788 portu açılamadı: {exc}")
-            messagebox.showwarning("OBS katmanı", "8788 portu kullanımda. Önce diğer uygulamayı kapat.")
+            messagebox.showerror("OBS katmanı", "8788 portunu başka bir program kullanıyor. "
+                                 "Canlı çeviri başlatılamaz; diğer programı kapatıp bu uygulamayı yeniden açın.")
         self.pump_after = self.root.after(20, self.pump)
         self.root.protocol("WM_DELETE_WINDOW", self.close)
 
@@ -521,6 +524,21 @@ class MainWindow:
         self.active_capture_settings=s
         if not diagnostic:self._spawn(self.translate_worker, s, self.stop_evt, session_id)
         self._spawn(self.capture_worker, s, self.stop_evt, session_id)
+        if not diagnostic:
+            # Reload Ediz's own OBS Browser Source so a page opened before this
+            # server existed reconnects without a manual cache refresh.
+            threading.Thread(target=self._refresh_obs_overlay, args=(s, self.stop_evt, session_id),
+                             name='obs-overlay-refresh', daemon=True).start()
+
+    def _refresh_obs_overlay(self, s, stop_flag, session_id):
+        from ediz_game_translator.subtitles.obs_overlay_refresh import ensure_overlay_connected
+        if self.server is None:return
+        try:
+            ensure_overlay_connected(lambda:self._obs(s),
+                lambda:self.overlay_state.browser_seen, self.server.server_port, stop=stop_flag,
+                on_status=lambda message:self.post_session(session_id,'log',message))
+        except Exception as exc:
+            self.post_session(session_id,'log','OBS katmanı otomatik yenilenemedi: '+type(exc).__name__)
 
     def capture_worker(self, s, stop_flag, session_id, jobs=None):
         buffered = None
@@ -826,10 +844,18 @@ def main():
         ctypes.windll.shcore.SetProcessDpiAwareness(2)
     except Exception:
         pass
-    from ediz_game_translator.storage.instance_lock import InstanceLock
+    from ediz_game_translator.storage.instance_lock import InstanceLock, AppInstanceMutex
+    try:
+        # One app per Windows session, whichever EXE or profile launched it.
+        instance = AppInstanceMutex()
+    except OSError:
+        messagebox.showerror('Ediz Game Translator', 'Ediz Game Translator zaten açık (başka bir sürüm veya profil olabilir). '
+                             'Önce açık olan pencereyi kapatın.')
+        return
     try:
         lock = InstanceLock(config_folder() / 'instance.lock')
     except OSError:
+        instance.close()
         messagebox.showerror('Ediz Game Translator', 'Başka bir uygulama örneği açık.')
         return
     try:
@@ -840,6 +866,7 @@ def main():
         root.mainloop()
     finally:
         lock.close()
+        instance.close()
 
 
 if __name__ == "__main__":

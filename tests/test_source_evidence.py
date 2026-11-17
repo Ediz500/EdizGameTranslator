@@ -104,7 +104,13 @@ class EvidencePipelineTests(unittest.TestCase):
                 self.store.complete_translation(self.jobs[-1],'Güncel A.',self.now[0])
                 self.assertTrue(self.snapshot())
                 count=len(self.jobs)
-                self.texts=[b];self.assertEqual(self.step(.04),[])
+                # Stage 1: one conflicting reading cannot end a verified utterance
+                # (it may be OCR damage); A stays and no job is created yet.
+                self.texts=[b];held=self.step(.04)
+                self.assertEqual([x['text'] for x in held],['Güncel A.'])
+                self.assertEqual(len(self.jobs),count)
+                # The second consecutive reading confirms B: never merged, A removed at once.
+                self.assertEqual(self.step(.04),[])
                 self.assertEqual(len(self.jobs),count+1)
                 self.assertEqual(self.store.db.execute('SELECT canonical FROM live_sources WHERE active=1').fetchone()[0],b)
 
