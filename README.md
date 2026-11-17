@@ -2,7 +2,9 @@
 
 Windows üzerinde capture card görüntüsündeki İngilizce oyun repliklerini OCR ile okuyup yerel OPUS-MT/CTranslate2 motoruyla Türkçeye çevirir. CustomTkinter kontrol paneli, OBS Browser Source ve tıklamaları geçiren Windows altyazı katmanı içerir.
 
-Bu geliştirme dalı: `codex/ui-live-sync-redesign`. Başlangıç: `codex/local-only-cleanup`. Eski API sürümü [archive/openai-api-legacy](https://github.com/Ediz500/EdizGameTranslator/tree/archive/openai-api-legacy) dalındadır. Canlı uygulamada bulut çeviri, ücretli API veya otomatik model indirme yoktur.
+Bu geliştirme dalı: `codex/subtitle-flicker-fix`; inceleme tabanı `codex/ui-live-sync-redesign`. **Gerçek PS5 testinde flicker, İngilizcenin zaman zaman görünmesi ve gereksiz çeviri işleri hâlâ çözülmemiştir.** 255/255 otomatik test, gerçek oyunda kararlılık onayı değildir. Güncel sürümler, normal başlatıcı, dosya düzeni ve bağımsız inceleme kapsamı: [PROJE_DURUMU.md](PROJE_DURUMU.md).
+
+Eski API sürümü [archive/openai-api-legacy](https://github.com/Ediz500/EdizGameTranslator/tree/archive/openai-api-legacy) dalındadır. Canlı uygulamada bulut çeviri, ücretli API veya otomatik çeviri modeli indirme yoktur. Bu aktarım görevinde model/bağımlılık indirilmedi ve uygulama davranışı değiştirilmedi.
 
 ## Canlı altyazı davranışı
 
