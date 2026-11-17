@@ -93,7 +93,7 @@ EdizGameTranslator/
 
 Depo: [Ediz500/EdizGameTranslator](https://github.com/Ediz500/EdizGameTranslator).
 İnceleme dalı: [codex/subtitle-flicker-fix](https://github.com/Ediz500/EdizGameTranslator/tree/codex/subtitle-flicker-fix).
-Karşılaştırma tabanı: `codex/ui-live-sync-redesign`. Yeni Draft PR bağlantısı teslim raporunda verilir; PR birleştirilmez.
+Bağımsız inceleme: [Draft PR #4](https://github.com/Ediz500/EdizGameTranslator/pull/4). Karşılaştırma tabanı: `codex/ui-live-sync-redesign`. PR taslaktır ve birleştirilmez.
 
 Önce bu belgeyi ve [önceki flicker kanıtının sınırlarını](docs/reports/ALTYAZI_FLICKER.md) okuyun. İnceleme odağı: OCR/track yaşam döngüsü, `live_sources`, tekrar iş üretimi, geç sonuçlar, boş sunucu snapshot'ları, browser DOM güncellemeleri ve maske güncelliği. Testlerden geçen varsayımların gerçek PS5 görüntüsünü neden karşılamadığını bağımsız değerlendirin; sentetik başarıyı çözüm kabul etmeyin.
 
