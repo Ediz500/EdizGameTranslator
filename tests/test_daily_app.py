@@ -133,6 +133,8 @@ class DailyGuiTests(unittest.TestCase):
         self.local_factory=self.stack.enter_context(patch('ediz_game_translator.app.WarmNMTClient',return_value=self.local))
         self.stack.enter_context(patch('ediz_game_translator.app.model_manifest',return_value=(self.folder,{})))
         import customtkinter as ctk
+        from ediz_game_translator.subtitles.overlay_server import launch_server
+        self.stack.enter_context(patch('ediz_game_translator.app.launch_server',side_effect=lambda state:launch_server(state,0)))
         self.root=ctk.CTk();self.w=app.MainWindow(self.root)
         config={'name':'Test','virtual-camera':{'type2':2,'source':'Raw'},
                 'sources':[{'name':'Raw','id':'dshow_input','settings':{'video_device_id':'raw-card'},'filters':[]}]}
@@ -153,13 +155,32 @@ class DailyGuiTests(unittest.TestCase):
         self.w.start()
         self.wait(lambda:self.w.overlay_state.current()=='Beni takip et!')
         self.assertTrue(self.w.running);self.assertEqual(self.w.start_btn['text'],'■  DURDUR')
-        with urlopen('http://127.0.0.1:8788/state',timeout=2) as r:
+        with urlopen(f'http://127.0.0.1:{self.w.server.server_port}/state',timeout=2) as r:
             self.assertEqual(json.load(r)['text'],'Beni takip et!')
         self.assertEqual(self.local.translate.call_count,1)
         self.assertEqual(self.cloud_guard.attempts,[])
         self.device.assert_called_once();self.obs.frame.assert_not_called()
         with closing(sqlite3.connect(self.folder/'subtitles.sqlite3')) as db:
             self.assertEqual(db.execute('SELECT status,translated FROM subtitles').fetchall(),[('translated','Beni takip et!')])
+
+    def test_start_reloads_only_the_ediz_obs_browser_source(self):
+        port=self.w.server.server_port;raw=self.obs.client.get_input_settings.return_value
+        urls={'Ediz Türkçe Altyazı':f'http://127.0.0.1:{port}/overlay','Kick Chat':'https://chat.example.invalid/'}
+        self.obs.client.get_input_list.return_value=SimpleNamespace(inputs=[{'inputName':n} for n in urls])
+        self.obs.client.get_input_settings.side_effect=lambda name:(SimpleNamespace(input_kind='browser_source',
+            input_settings={'url':urls[name]}) if name in urls else raw)
+        self.w.start()
+        self.wait(lambda:self.obs.client.press_input_properties_button.called)
+        self.obs.client.press_input_properties_button.assert_any_call('Ediz Türkçe Altyazı','refreshnocache')
+        self.assertNotIn(('Kick Chat','refreshnocache'),[c.args for c in self.obs.client.press_input_properties_button.call_args_list])
+        for forbidden in ('set_input_settings','create_input','remove_input','set_current_program_scene','start_stream','stop_virtual_cam'):
+            getattr(self.obs.client,forbidden).assert_not_called()
+
+    def test_live_translation_refused_without_owned_overlay_port(self):
+        self.w.server.shutdown();self.w.server.server_close();self.w.server=None
+        self.w.start()
+        self.assertFalse(self.w.running);self.message.assert_called()
+        self.device.assert_not_called();self.local_factory.assert_not_called()
 
     def test_no_local_engine_if_route_cannot_be_verified(self):
         self.route.check.side_effect=camera.CaptureConfigurationError('Unsafe route')

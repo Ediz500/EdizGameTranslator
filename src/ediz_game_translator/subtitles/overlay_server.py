@@ -10,7 +10,7 @@ from urllib.parse import urlparse
 from ediz_game_translator.subtitles.overlay_view import OVERLAY_HTML
 from ediz_game_translator.subtitles.subtitle_display import DisplayManager
 from ediz_game_translator.subtitles.live_display import LiveDisplayManager
-from ediz_game_translator.subtitles.layout import arrange_blocks
+from ediz_game_translator.subtitles.layout import VisualLayout,visual_signature
 from ediz_game_translator.storage.subtitle_styles import DEFAULT_STYLE,valid_style
 from copy import deepcopy
 import uuid
@@ -23,6 +23,7 @@ class SharedOverlayState:
         self.generation=uuid.uuid4().hex;self.browser_seen=0
         self.transport='poll'
         self.style=deepcopy(DEFAULT_STYLE)
+        self.visual_layout=VisualLayout()
 
     def bind(self,store,session,ready_first=False,*,live=False):
         with self.lock:
@@ -55,12 +56,13 @@ class SharedOverlayState:
         with self.lock:
             if self.manager is not None:self.manager.clear(reason)
             self.manager=None;self.generation=uuid.uuid4().hex;self.version+=1
+            self.visual_layout.reset()
 
     def snapshot(self):
         with self.lock:
             if self.manager:self.manager.browser_required=self.browser_seen>0 and time.monotonic()-self.browser_seen<2
             data=self.manager.snapshot() if self.manager else dict(blocks=[],waiting=0,backlog_seconds=0,translation_pending=0,overloaded=False)
-            data['blocks']=arrange_blocks(data['blocks'],self.style)
+            data['blocks']=self.visual_layout.arrange(data['blocks'],self.style,self.generation)
             return dict(**data,generation=self.generation,font=self.font,bottom=self.bottom,version=self.version,style=deepcopy(self.style))
 
     def json(self):
@@ -104,6 +106,16 @@ class SharedOverlayState:
 
 def launch_server(state: SharedOverlayState, port: int = 8788):
     class OverlayHTTPServer(ThreadingHTTPServer):
+        # Windows SO_REUSEADDR lets a second process bind the same port silently;
+        # exclusive binding makes a port conflict an error instead of a hijack.
+        allow_reuse_address = False
+
+        def server_bind(self):
+            import socket
+            if hasattr(socket, 'SO_EXCLUSIVEADDRUSE'):
+                self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+            super().server_bind()
+
         def shutdown(self):
             self.stream_stop.set()
             super().shutdown()
@@ -128,12 +140,11 @@ def launch_server(state: SharedOverlayState, port: int = 8788):
                     while not self.server.stream_stop.is_set():
                         body=state.json();data=json.loads(body)
                         signature=(data['generation'],json.dumps(data['style'],sort_keys=True),
-                            tuple((b['id'],b['text'],b['speaker'],tuple(b['mask_rect']),tuple(b.get('source_size',(1920,1080)))) for b in data['blocks']))
-                        if signature!=last:
+                            visual_signature(data['blocks']))
+                        # Full snapshots also act as JS-visible liveness heartbeats.
+                        if signature!=last or time.monotonic()-heartbeat>=.5:
                             self.wfile.write(b'data: '+body+b'\n\n');self.wfile.flush()
                             state.record_sent(data,'sse');last=signature;heartbeat=time.monotonic()
-                        elif time.monotonic()-heartbeat>10:
-                            self.wfile.write(b': keepalive\n\n');self.wfile.flush();heartbeat=time.monotonic()
                         state.wait_for_event()
                 except (OSError,ConnectionError):pass
                 finally:self.server.stream_slots.release()

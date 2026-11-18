@@ -136,6 +136,8 @@ class CaptureRunner:
         self.interval = interval
         self.change_gate=change_gate
         self.gate = SubtitleGate()  # Legacy rule retained for comparison tests.
+        from ediz_game_translator.capture.source_evidence import SourceEvidence
+        self.source_evidence=SourceEvidence(debounce) if live else None
         self.live=live;self.crop_rect=crop_rect;self.on_metrics=on_metrics;self.next_metrics=0
         self.tracker = ActiveSubtitles(live=live,debounce=debounce)
         if live:self.store.enable_live_session(session,debounce,stale)
@@ -177,7 +179,17 @@ class CaptureRunner:
             return 0
         candidates, evidence = dialogue_candidates(result, region.width, getattr(region,'height',0))
         tracking_candidates=([c for c in candidates if math.isfinite(c.confidence) and c.confidence>=.65] if self.live else candidates)
+        originals={};supported=set()
+        if self.source_evidence is not None:
+            tracking_candidates,originals,supported=self.source_evidence.reconcile(
+                tracking_candidates,self.tracker.tracks,region,sample_time)
         actions = self.tracker.update(tracking_candidates,sample_time)
+        if self.source_evidence is not None:
+            self.source_evidence.observe(actions,region,sample_time,getattr(result,'boxes',None),supported-set(originals))
+            for action in actions:
+                if action.track.key in supported:
+                    action.reason='image_supported_glyph' if action.track.key in originals else 'image_supported_dropout'
+
         if self.change_gate is not None:
             self.change_gate.confirm=any(not a.track.accepted and a.candidate.confidence>=.65 for a in actions)
         primary = max(actions,key=lambda a:a.candidate.box[3] if a.candidate.box else a.candidate.indices[-1] if a.candidate.indices else 0) if actions else None
@@ -228,8 +240,9 @@ class CaptureRunner:
                     self.store.refresh_pending_source(self.session,track.row,track.canonical)
             if track.row is not None:
                 self.store.seen(track.row,sample_time,captured_utc)
-            self.store.observation(frame_id,track.row,track.key,candidate.speaker,candidate.text,
-                                   candidate.confidence,candidate.box,action.reason)
+            observed=originals.get(track.key,candidate)
+            self.store.observation(frame_id,track.row,track.key,observed.speaker,observed.text,
+                                   observed.confidence,observed.box,action.reason)
         self.active_id=primary.track.row if primary else None
         if primary:
             self.active_first=primary.track.first_seen
@@ -243,6 +256,17 @@ class CaptureRunner:
                 bounds=None
                 if candidate.box is not None:
                     x0,x1,y0,y1=candidate.box;l,t,r,b=self.crop_rect
+                    bounds=[l+x0/image.width,t+y0/image.height,l+x1/image.width,t+y1/image.height]
+                entries.append(dict(subtitle_id=track.row,track_key=track.key,canonical=track.canonical,
+                    speaker=track.speaker,bounds=bounds))
+            published={e['subtitle_id'] for e in entries}
+            for track in self.tracker.held:
+                # A verified utterance overlapped only by an unconfirmed conflicting
+                # reading is still on screen; keep its source (bounded by CONTEST_HOLD).
+                if track.row is None or track.row in published:continue
+                bounds=None
+                if track.box is not None:
+                    x0,x1,y0,y1=track.box;l,t,r,b=self.crop_rect
                     bounds=[l+x0/image.width,t+y0/image.height,l+x1/image.width,t+y1/image.height]
                 entries.append(dict(subtitle_id=track.row,track_key=track.key,canonical=track.canonical,
                     speaker=track.speaker,bounds=bounds))
